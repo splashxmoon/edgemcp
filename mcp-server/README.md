@@ -19,9 +19,14 @@ on your machine.
 
 ## Install
 
+Requires Python 3.10 or newer.
+
 ```bash
-pip install edgedefense-mcp
+pip install "edgedefense-core @ git+https://github.com/splashxmoon/edgemcp.git#subdirectory=core-engine" "edgedefense-mcp @ git+https://github.com/splashxmoon/edgemcp.git#subdirectory=mcp-server"
 ```
+
+Both packages are named in one command on purpose: the server depends on the
+engine, and neither is on PyPI yet, so pip has to be told where to find both.
 
 Then add one entry to your MCP client config.
 
@@ -113,7 +118,7 @@ Only packet *headers* and counters are kept. No contents are stored, nothing is
 decrypted, and captures are one-off and time-bounded — never continuous.
 
 ```bash
-pip install 'edgedefense-mcp[tier1]'
+pip install scapy
 ```
 
 ---

@@ -98,8 +98,8 @@ def _import_scapy():
     except Exception as exc:  # ImportError, or a libpcap/Npcap loading failure
         raise CaptureUnavailable(
             "The traffic-capture backend could not be loaded. Install it with "
-            "`pip install 'edgedefense-mcp[tier1]'`. On Windows, Npcap must also be "
-            f"installed. (Underlying error: {type(exc).__name__}: {exc})"
+            "`pip install scapy`. On Windows, Npcap must also be installed. "
+            f"(Underlying error: {type(exc).__name__}: {exc})"
         ) from exc
 
 

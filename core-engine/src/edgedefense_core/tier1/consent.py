@@ -139,10 +139,9 @@ def backend_hint() -> str:
     """Actionable guidance for whatever is currently missing."""
     if not has_capture_backend():
         return (
-            "The capture backend is not installed. Install it with: "
-            "pip install 'edgedefense-mcp[tier1]'  (this adds scapy). On Windows you "
-            "will also need Npcap installed; on macOS and Linux libpcap is normally "
-            "already present."
+            "The capture backend is not installed. Install it with: pip install scapy. "
+            "On Windows you will also need Npcap installed; on macOS and Linux libpcap "
+            "is normally already present."
         )
     if not has_elevated_privileges():
         if sys.platform == "win32":
