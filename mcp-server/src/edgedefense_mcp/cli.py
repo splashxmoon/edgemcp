@@ -29,6 +29,12 @@ DEFAULT_PORT = 8765
 #: Read when --token is not passed, so the secret need not appear in shell history.
 TOKEN_ENV_VAR = "EDGEDEFENSE_TOKEN"
 PASSPHRASE_ENV_VAR = "EDGEDEFENSE_PASSPHRASE"
+GOOGLE_ID_ENV_VAR = "EDGEDEFENSE_GOOGLE_CLIENT_ID"
+GOOGLE_SECRET_ENV_VAR = "EDGEDEFENSE_GOOGLE_CLIENT_SECRET"
+
+#: Path Google redirects back to. Must be registered verbatim in Google Cloud
+#: Console, or Google refuses the whole flow.
+GOOGLE_CALLBACK_PATH = "/auth/google/callback"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -110,6 +116,28 @@ def build_parser() -> argparse.ArgumentParser:
             "omitted, which keeps it out of shell history"
         ),
     )
+
+    google = parser.add_argument_group("google sign-in (optional)")
+    google.add_argument(
+        "--google-client-id", default=None,
+        help=f"Google OAuth client ID. Read from ${GOOGLE_ID_ENV_VAR} when omitted",
+    )
+    google.add_argument(
+        "--google-client-secret", default=None,
+        help=f"Google OAuth client secret. Read from ${GOOGLE_SECRET_ENV_VAR} when omitted",
+    )
+    google.add_argument(
+        "--allow-email", action="append", default=[], metavar="EMAIL",
+        help=(
+            "email address permitted to sign in with Google; repeatable. Required "
+            "when Google sign-in is enabled, because signing in successfully is not "
+            "the same as being allowed in"
+        ),
+    )
+    google.add_argument(
+        "--no-passphrase", action="store_true",
+        help="with Google sign-in enabled, disable the passphrase form entirely",
+    )
     return parser
 
 
@@ -155,6 +183,14 @@ def run_http(args: argparse.Namespace) -> int:
 
     if args.oauth:
         passphrase = args.passphrase or os.environ.get(PASSPHRASE_ENV_VAR) or ""
+        google_id = args.google_client_id or os.environ.get(GOOGLE_ID_ENV_VAR) or ""
+        google_secret = (
+            args.google_client_secret or os.environ.get(GOOGLE_SECRET_ENV_VAR) or ""
+        )
+        google_wanted = bool(google_id or google_secret or args.allow_email)
+        if args.no_passphrase:
+            passphrase = ""
+
         if not args.public_url:
             warn(
                 "--oauth needs --public-url: the URL clients reach this server on, e.g. "
@@ -162,27 +198,54 @@ def run_http(args: argparse.Namespace) -> int:
                 "your client are built from it, so a guess would break the flow."
             )
             return 2
-        if not passphrase:
+        if not passphrase and not google_wanted:
             warn(
-                "--oauth needs a passphrase. Pass --passphrase or set "
-                f"${PASSPHRASE_ENV_VAR}. Without one, anyone who reaches the sign-in "
-                "page could connect."
+                "--oauth needs a way to sign in. Pass --passphrase (or set "
+                f"${PASSPHRASE_ENV_VAR}), or configure Google sign-in with "
+                "--google-client-id, --google-client-secret and --allow-email. "
+                "Without one, anyone reaching the sign-in page could connect."
             )
             return 2
 
         public = args.public_url.rstrip("/")
+
+        google = None
+        if google_wanted:
+            from .google_auth import GoogleAuthenticator
+
+            try:
+                google = GoogleAuthenticator(
+                    client_id=google_id,
+                    client_secret=google_secret,
+                    redirect_uri=f"{public}{GOOGLE_CALLBACK_PATH}",
+                    allowed_emails=args.allow_email,
+                )
+            except ValueError as exc:
+                warn(f"Google sign-in is not configured correctly: {exc}")
+                return 2
         # The public hostname is what the browser and client will send.
         host_only = public.split("://", 1)[-1].split("/", 1)[0]
         if "*" not in allowed and host_only not in allowed:
             allowed.append(host_only)
 
         app = build_oauth_app(mcp, passphrase=passphrase, public_url=public,
-                              allowed_hosts=allowed)
+                              allowed_hosts=allowed, google=google)
+        methods = []
+        if google:
+            methods.append(f"Google ({len(google.allowed_emails)} allowed address(es))")
+        if passphrase:
+            methods.append("passphrase")
+
         warn("")
         warn("EdgeDefense MCP - HTTP mode with browser sign-in")
         warn(f"  Connector URL : {public}{MCP_PATH}")
         warn(f"  Sign-in page  : {public}/login")
+        warn(f"  Sign in with  : {' and '.join(methods)}")
         warn(f"  Listening on  : http://{args.host}:{args.port}")
+        if google:
+            warn("")
+            warn("  Google Cloud Console must list this exact redirect URI:")
+            warn(f"    {public}{GOOGLE_CALLBACK_PATH}")
         warn("")
         warn("  Paste the connector URL into your client and leave the OAuth fields")
         warn("  empty. It will register itself and open the sign-in page.")

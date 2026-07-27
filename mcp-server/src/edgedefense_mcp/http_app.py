@@ -140,6 +140,7 @@ def build_oauth_app(
     passphrase: str,
     public_url: str,
     allowed_hosts: Optional[List[str]] = None,
+    google: Any = None,
 ) -> Any:
     """Build the app with a full OAuth 2.1 flow in front of the MCP endpoint.
 
@@ -160,44 +161,97 @@ def build_oauth_app(
 
     provider = EdgeDefenseAuthProvider(passphrase=passphrase, public_url=public_url)
     issuer = AnyHttpUrl(public_url)
+    passphrase_enabled = bool(passphrase)
+    google_enabled = google is not None
+
+    def login_html(txn_id, request, client_name=None, error=None, status=200):
+        from starlette.responses import HTMLResponse
+
+        return HTMLResponse(
+            render_login(
+                txn_id, request.url.hostname or "", client_name, error,
+                google_enabled=google_enabled, passphrase_enabled=passphrase_enabled,
+            ),
+            status_code=status,
+        )
 
     _configure_security(mcp_server, allowed_hosts)
     mcp_server.settings.streamable_http_path = MCP_PATH
+
+    EXPIRED = "This sign-in link has expired. Start again from your client."
+
+    async def _client_name(txn):
+        client = await provider.get_client(txn.client_id)
+        return getattr(client, "client_name", None) if client else None
 
     async def login_form(request):
         txn_id = request.query_params.get("txn", "")
         txn = provider.transaction(txn_id)
         if txn is None:
-            return HTMLResponse(
-                render_login("", request.url.hostname or "",
-                             error="This sign-in link has expired. Start again from your client."),
-                status_code=400,
-            )
-        client = await provider.get_client(txn.client_id)
-        name = getattr(client, "client_name", None) if client else None
-        return HTMLResponse(render_login(txn_id, request.url.hostname or "", name))
+            return login_html("", request, error=EXPIRED, status=400)
+        return login_html(txn_id, request, await _client_name(txn))
 
     async def login_submit(request):
+        if not passphrase_enabled:
+            return login_html("", request, error="Passphrase sign-in is disabled.", status=400)
+
         form = await request.form()
         txn_id = str(form.get("txn", ""))
         supplied = str(form.get("passphrase", ""))
 
         txn = provider.transaction(txn_id)
         if txn is None:
-            return HTMLResponse(
-                render_login("", request.url.hostname or "",
-                             error="This sign-in link has expired. Start again from your client."),
-                status_code=400,
-            )
+            return login_html("", request, error=EXPIRED, status=400)
 
         if not provider.check_passphrase(supplied):
-            client = await provider.get_client(txn.client_id)
-            return HTMLResponse(
-                render_login(txn_id, request.url.hostname or "",
-                             getattr(client, "client_name", None) if client else None,
-                             error="That passphrase is not correct."),
-                status_code=401,
-            )
+            return login_html(txn_id, request, await _client_name(txn),
+                              error="That passphrase is not correct.", status=401)
+
+        redirect_to = provider.complete_login(txn_id)
+        if not redirect_to:
+            return HTMLResponse(render_done())
+        return RedirectResponse(redirect_to, status_code=302)
+
+    async def google_start(request):
+        """Hand the browser to Google, remembering which MCP request this is."""
+        txn_id = request.query_params.get("txn", "")
+        if provider.transaction(txn_id) is None:
+            return login_html("", request, error=EXPIRED, status=400)
+        return RedirectResponse(google.start(txn_id), status_code=302)
+
+    async def google_callback(request):
+        """Google sends the browser back here with a code."""
+        from .google_auth import GoogleAuthError
+
+        error = request.query_params.get("error")
+        if error:
+            return login_html("", request, error=f"Google sign-in was cancelled ({error}).",
+                              status=400)
+
+        state = request.query_params.get("state", "")
+        code = request.query_params.get("code", "")
+        # Validating state is what stops a forged callback completing someone
+        # else's pending authorization.
+        txn_id = google.consume_state(state)
+        if not txn_id or not code:
+            return login_html("", request, error=EXPIRED, status=400)
+
+        txn = provider.transaction(txn_id)
+        if txn is None:
+            return login_html("", request, error=EXPIRED, status=400)
+
+        try:
+            email, _claims = await google.exchange(code)
+        except GoogleAuthError as exc:
+            return login_html(txn_id, request, await _client_name(txn),
+                              error=str(exc), status=401)
+
+        if not google.is_allowed(email):
+            # Authenticated, but not authorised. Naming the address makes a
+            # misconfigured allowlist obvious instead of mysterious.
+            return login_html(
+                txn_id, request, await _client_name(txn),
+                error=f"{email} is not on this server's allowed list.", status=403)
 
         redirect_to = provider.complete_login(txn_id)
         if not redirect_to:
@@ -214,6 +268,9 @@ def build_oauth_app(
         Route("/login", login_submit, methods=["POST"]),
         Route("/healthz", health, methods=["GET"]),
     ]
+    if google_enabled:
+        routes.append(Route("/auth/google/start", google_start, methods=["GET"]))
+        routes.append(Route("/auth/google/callback", google_callback, methods=["GET"]))
     routes.extend(
         create_auth_routes(
             provider=provider,

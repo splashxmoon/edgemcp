@@ -68,11 +68,43 @@ _STYLE = """
 """
 
 
+_GOOGLE_MARK = (
+    '<svg width="17" height="17" viewBox="0 0 48 48" aria-hidden="true">'
+    '<path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-2.7-.4-3.9H24v7.1h12.1c-.2 1.8-1.6 4.6-4.5 6.5'
+    'l6.9 5.4c4.1-3.8 6.6-9.4 6.6-15.1z"/>'
+    '<path fill="#34A853" d="M24 46c5.9 0 10.9-2 14.5-5.3l-6.9-5.4c-1.8 1.3-4.3 2.2-7.6 2.2-5.8 0'
+    '-10.7-3.8-12.5-9.1l-7.1 5.5C8.1 41.1 15.4 46 24 46z"/>'
+    '<path fill="#FBBC05" d="M11.5 28.4c-.5-1.4-.7-2.9-.7-4.4s.3-3 .7-4.4l-7.1-5.5C2.9 17 2 20.4 2'
+    ' 24s.9 7 2.4 9.9l7.1-5.5z"/>'
+    '<path fill="#EA4335" d="M24 10.7c4.1 0 6.9 1.8 8.5 3.3l6.2-6C34.9 4.5 29.9 2 24 2 15.4 2 8.1 '
+    '6.9 4.4 14.1l7.1 5.5C13.3 14.3 18.2 10.7 24 10.7z"/></svg>'
+)
+
+_GOOGLE_STYLE = """
+  .gbtn {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    width: 100%; padding: 11px; margin-bottom: 4px; font-size: 15px; font-weight: 600;
+    border: 1px solid #cbd2da; border-radius: 9px; background: #fff; color: #16181d;
+    text-decoration: none; cursor: pointer;
+  }
+  .gbtn:hover { background: #f6f7f9; }
+  .or { display: flex; align-items: center; gap: 12px; margin: 18px 0 14px;
+        color: #9aa1ab; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  .or::before, .or::after { content: ""; flex: 1; height: 1px; background: #e3e6ea; }
+  @media (prefers-color-scheme: dark) {
+    .gbtn { background: #fff; color: #16181d; border-color: #333944; }
+    .or::before, .or::after { background: #2a2e37; }
+  }
+"""
+
+
 def render_login(
     txn: str,
     host: str,
     client_name: str | None = None,
     error: str | None = None,
+    google_enabled: bool = False,
+    passphrase_enabled: bool = True,
 ) -> str:
     """Build the sign-in page.
 
@@ -84,6 +116,25 @@ def render_login(
     who = html.escape(client_name) if client_name else "An MCP client"
     error_block = f'<div class="err">{html.escape(error)}</div>' if error else ""
 
+    google_block = ""
+    if google_enabled and safe_txn:
+        google_block = (
+            f'<a class="gbtn" href="/auth/google/start?txn={safe_txn}">'
+            f"{_GOOGLE_MARK}<span>Sign in with Google</span></a>"
+        )
+        if passphrase_enabled:
+            google_block += '<div class="or">or</div>'
+
+    passphrase_block = ""
+    if passphrase_enabled:
+        passphrase_block = f"""<form method="post" action="/login">
+      <input type="hidden" name="txn" value="{safe_txn}">
+      <label for="passphrase">Passphrase</label>
+      <input id="passphrase" name="passphrase" type="password"
+             autocomplete="current-password" autofocus required>
+      <button type="submit">Sign in and connect</button>
+    </form>"""
+
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -91,7 +142,7 @@ def render_login(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>Sign in - EdgeDefense</title>
-<style>{_STYLE}</style>
+<style>{_STYLE}{_GOOGLE_STYLE}</style>
 </head>
 <body>
   <main class="card">
@@ -105,16 +156,10 @@ def render_login(
 
     {error_block}
 
-    <p class="lede">{who} is asking to connect to this network scanner.
-    Enter the passphrase you started the server with.</p>
+    <p class="lede">{who} is asking to connect to this network scanner.</p>
 
-    <form method="post" action="/login">
-      <input type="hidden" name="txn" value="{safe_txn}">
-      <label for="passphrase">Passphrase</label>
-      <input id="passphrase" name="passphrase" type="password"
-             autocomplete="current-password" autofocus required>
-      <button type="submit">Sign in and connect</button>
-    </form>
+    {google_block}
+    {passphrase_block}
 
     <div class="grants">
       <strong>Connecting grants read-only access to:</strong>

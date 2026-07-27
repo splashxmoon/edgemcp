@@ -131,6 +131,28 @@ on. Hosting it on a VPS would work perfectly and tell you about the VPS's
 network, which is not what you want. The arrangement that makes sense is a
 tunnel from a public hostname back to a machine at home.
 
+#### Getting a public URL
+
+Start with a quick tunnel. It needs no DNS changes at all and proves the whole
+thing works in about a minute:
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:8765
+```
+
+That prints a `https://<random>.trycloudflare.com` URL. Pass it as
+`--public-url` and use it in your client. The URL changes each run, which is
+fine for testing.
+
+For a stable address on your own domain, note two things. A subdomain like
+`mcp.example.com` is yours automatically — subdomains are not bought
+separately, you just create a DNS record. But `cloudflared tunnel route dns`
+only works if the domain's nameservers point at Cloudflare. If your domain is
+still on your registrar's nameservers, either move the zone to Cloudflare
+(re-creating every existing record first — **MX records especially, or email
+stops arriving**) or use a tunnel provider that gives you a CNAME target you
+can paste into your current DNS panel.
+
 #### With browser sign-in (recommended)
 
 Connecting opens a sign-in page on your own domain, and your client ends up
@@ -159,6 +181,41 @@ revokes every issued token.
 
 `--public-url` must match exactly what the browser sees, since the OAuth
 metadata and the redirect back to your client are built from it.
+
+#### Sign in with Google instead of a passphrase
+
+Rather than sharing one passphrase, you can sign in with Google and allow
+specific addresses.
+
+Create an OAuth client in the Google Cloud Console (APIs & Services →
+Credentials → Create credentials → OAuth client ID → Web application), and add
+this exact redirect URI:
+
+```
+https://mcp.edgedefenseai.com/auth/google/callback
+```
+
+Then:
+
+```bash
+export EDGEDEFENSE_GOOGLE_CLIENT_ID='...apps.googleusercontent.com'
+export EDGEDEFENSE_GOOGLE_CLIENT_SECRET='...'
+edgedefense-mcp --http --oauth \
+  --public-url https://mcp.edgedefenseai.com \
+  --allow-email you@gmail.com \
+  --no-passphrase
+```
+
+`--allow-email` is required and repeatable. Signing in with Google proves who
+someone is; it does not decide whether they may read your network, and without
+an allowlist any Google account would satisfy the check. Omit `--no-passphrase`
+to offer both methods on the sign-in page.
+
+> **One honest caveat.** With Google sign-in enabled, this server contacts
+> Google while somebody is signing in — that is unavoidable for any identity
+> provider. Scanning still makes no outbound request of any kind, and no
+> network data is ever sent anywhere. If you would rather the server never
+> talk to anything, use the passphrase.
 
 #### With a token in the URL (simpler)
 
