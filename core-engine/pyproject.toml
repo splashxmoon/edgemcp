@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "edgedefense-core"
+version = "0.1.0"
+description = "Shared network discovery, identification and scoring engine for EdgeDefense."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["network", "discovery", "security", "home-network", "arp", "mdns"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Networking :: Monitoring",
+]
+
+# Deliberately empty. Tier 0 uses only the standard library, which is what makes
+# "no elevated permissions, no surprises" a claim we can actually stand behind.
+dependencies = []
+
+[project.optional-dependencies]
+# Tier 1 only. Never required for the default experience.
+tier1 = ["scapy>=2.5.0"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/edgedefense_core"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/edgedefense_core/data/oui.csv" = "edgedefense_core/data/oui.csv"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

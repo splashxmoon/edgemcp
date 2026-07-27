@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Evaluation questions for edgedefense_mcp.
+
+  Every question is asked against the synthetic network in fixture.py, because
+  answers must be stable and verifiable and a real network is neither. Run with:
+
+      python evaluation/run_evaluation.py
+
+  Each answer is a single string, verifiable by comparison.
+-->
+<evaluation>
+
+  <qa_pair>
+    <question>Scan my network. How many devices are connected in total?</question>
+    <answer>9</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>What is my network trust score out of 100?</question>
+    <answer>70</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Which device on my network is the router? Give me just its IP address.</question>
+    <answer>192.168.1.1</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>One device on my network is accepting Telnet connections, which is the most serious thing you found. What is its IP address?</question>
+    <answer>192.168.1.22</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>There is a device at 192.168.1.40. Who manufactured it?</question>
+    <answer>Raspberry Pi</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>What kind of device is at 192.168.1.35? Answer with the device category only.</question>
+    <answer>Printer</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>I want to read the full explanation of the Telnet problem. What is the exact finding_id I should ask about?</question>
+    <answer>telnet_exposed:00:00:5e:00:53:01</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Go through every device on my network and count how many of them have at least one open port. How many?</question>
+    <answer>5</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>My trust score isn't 100. Looking at the score breakdown, how many points were deducted specifically for exposed services?</question>
+    <answer>26</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>One device could not be attributed to a manufacturer because it is using a randomised private hardware address rather than because anything is wrong. Which IP address is it?</question>
+    <answer>192.168.1.55</answer>
+  </qa_pair>
+
+</evaluation>

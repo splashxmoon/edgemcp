@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "edgedefense-mcp"
+version = "0.1.0"
+description = "Ask Claude about your home network. A local, private MCP server - no account, no cloud, no elevated permissions."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "EdgeDefense" }]
+keywords = ["mcp", "model-context-protocol", "network", "security", "home-network", "claude"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Networking :: Monitoring",
+]
+
+dependencies = [
+    "mcp>=1.2.0",
+    "edgedefense-core>=0.1.0",
+]
+
+[project.optional-dependencies]
+# Adds Tier 1 passive traffic capture. Never needed for the default experience.
+tier1 = ["edgedefense-core[tier1]>=0.1.0"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+edgedefense-mcp = "edgedefense_mcp:main"
+
+[project.urls]
+Homepage = "https://github.com/edgedefense/edgedefense-mcp"
+Repository = "https://github.com/edgedefense/edgedefense-mcp"
+Issues = "https://github.com/edgedefense/edgedefense-mcp/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/edgedefense_mcp"]
+
+# During local development the engine is consumed from the sibling folder rather
+# than from PyPI. Install it first with:  pip install -e ../core-engine
+[tool.uv.sources]
+edgedefense-core = { path = "../core-engine", editable = true }
