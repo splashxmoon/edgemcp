@@ -44,6 +44,38 @@ from .formatting import (
 
 __version__ = "0.1.0"
 
+
+def _disable_dotenv_loading() -> None:
+    """Stop FastMCP reading a .env file from whatever directory we start in.
+
+    FastMCP's ``Settings`` is a pydantic-settings model declared with
+    ``env_file=".env"``, so merely constructing it parses whichever .env
+    happens to sit in the working directory the MCP client launched us from --
+    typically the user's home directory, which we do not control.
+
+    If that file is not valid UTF-8, parsing raises and the server dies during
+    import, before it can serve anything. The client reports only "Connection
+    closed", which is close to undiagnosable from the user's side. A .env
+    written by PowerShell's default redirection is UTF-16, which triggers this
+    exactly.
+
+    This server takes no configuration of its own, so it has no reason to read
+    a .env at all. Disabling it removes a whole class of startup failure whose
+    trigger lives outside this project. Real ``FASTMCP_*`` environment
+    variables still work; only the file is ignored.
+    """
+    try:
+        from mcp.server.fastmcp.server import Settings
+
+        Settings.model_config["env_file"] = None
+    except Exception:
+        # Hardening must never itself prevent startup. If a future SDK layout
+        # makes this unreachable, test_startup_isolation.py will catch it.
+        pass
+
+
+_disable_dotenv_loading()
+
 mcp = FastMCP(
     "edgedefense_mcp",
     instructions=(
