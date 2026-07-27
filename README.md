@@ -131,7 +131,38 @@ on. Hosting it on a VPS would work perfectly and tell you about the VPS's
 network, which is not what you want. The arrangement that makes sense is a
 tunnel from a public hostname back to a machine at home.
 
-Start the server in HTTP mode with a token:
+#### With browser sign-in (recommended)
+
+Connecting opens a sign-in page on your own domain, and your client ends up
+holding a revocable token instead of a secret URL. The authorization server
+runs inside this process — there is no hosted login service and no account.
+
+```bash
+export EDGEDEFENSE_PASSPHRASE='choose-something-long'
+edgedefense-mcp --http --oauth --public-url https://mcp.edgedefenseai.com --port 8765
+```
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:8765
+```
+
+Then paste just the endpoint into the connector dialog, leaving both OAuth
+fields empty:
+
+```
+https://mcp.edgedefenseai.com/mcp
+```
+
+The client registers itself, discovers the authorization server, and opens the
+sign-in page. Enter the passphrase and it connects. Restarting the server
+revokes every issued token.
+
+`--public-url` must match exactly what the browser sees, since the OAuth
+metadata and the redirect back to your client are built from it.
+
+#### With a token in the URL (simpler)
+
+No browser step; the secret lives in the URL instead.
 
 ```bash
 edgedefense-mcp --http --port 8765 --token "$(python -c 'import secrets;print(secrets.token_urlsafe(32))')" --allow-host mcp.edgedefenseai.com
