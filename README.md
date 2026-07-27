@@ -47,16 +47,24 @@ Two more are available but switched off until you explicitly turn them on, becau
 
 ## Install
 
-Requires Python 3.10 or newer.
+Step 1 — install the server. Requires Python 3.10 or newer.
 
 ```bash
 pip install "edgedefense-core @ git+https://github.com/splashxmoon/edgemcp.git#subdirectory=core-engine" "edgedefense-mcp @ git+https://github.com/splashxmoon/edgemcp.git#subdirectory=mcp-server"
 ```
 
+Step 2 — tell your client about it.
+
 **Claude Code**
 
 ```bash
 claude mcp add edgedefense -- edgedefense-mcp
+```
+
+**Codex CLI**
+
+```bash
+codex mcp add edgedefense -- edgedefense-mcp
 ```
 
 **Claude Desktop** — `claude_desktop_config.json`
@@ -83,6 +91,29 @@ claude mcp add edgedefense -- edgedefense-mcp
 }
 ```
 
+**Codex CLI** (manual) — `~/.codex/config.toml`
+
+```toml
+[mcp_servers.edgedefense]
+command = "edgedefense-mcp"
+args = []
+```
+
+**VS Code / Copilot** — `.vscode/mcp.json`
+
+```json
+{
+  "servers": {
+    "edgedefense": {
+      "command": "edgedefense-mcp"
+    }
+  }
+}
+```
+
+Restart your client afterwards. Any other MCP client works too — the command is
+`edgedefense-mcp`, it takes no arguments, and it speaks stdio.
+
 <details>
 <summary>Where is the Claude Desktop config file?</summary>
 
@@ -94,7 +125,47 @@ claude mcp add edgedefense -- edgedefense-mcp
 
 </details>
 
-Restart your client after editing the config.
+<details>
+<summary>Client says "command not found" or the server won't start</summary>
+
+Desktop apps often don't see the same `PATH` your terminal does, which matters
+if you installed into a virtual environment. Find the real location:
+
+```bash
+# macOS / Linux
+which edgedefense-mcp
+
+# Windows
+where edgedefense-mcp
+```
+
+Then use that full path in the config instead of the bare name:
+
+```json
+{
+  "mcpServers": {
+    "edgedefense": {
+      "command": "/full/path/to/edgedefense-mcp"
+    }
+  }
+}
+```
+
+Running it through Python directly also works, and avoids the `PATH` question
+entirely:
+
+```json
+{
+  "mcpServers": {
+    "edgedefense": {
+      "command": "/full/path/to/python",
+      "args": ["-m", "edgedefense_mcp"]
+    }
+  }
+}
+```
+
+</details>
 
 ## Try it
 

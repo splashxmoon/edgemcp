@@ -30,7 +30,19 @@ engine, and neither is on PyPI yet, so pip has to be told where to find both.
 
 Then add one entry to your MCP client config.
 
-**Claude Desktop** — `claude_desktop_config.json`:
+**Claude Code**
+
+```bash
+claude mcp add edgedefense -- edgedefense-mcp
+```
+
+**Codex CLI**
+
+```bash
+codex mcp add edgedefense -- edgedefense-mcp
+```
+
+**Claude Desktop** — `claude_desktop_config.json`
 
 ```json
 {
@@ -42,22 +54,69 @@ Then add one entry to your MCP client config.
 }
 ```
 
-**Claude Code:**
+**Cursor** — `~/.cursor/mcp.json`
 
-```bash
-claude mcp add edgedefense -- edgedefense-mcp
+```json
+{
+  "mcpServers": {
+    "edgedefense": {
+      "command": "edgedefense-mcp"
+    }
+  }
+}
+```
+
+**Codex CLI** (manual) — `~/.codex/config.toml`
+
+```toml
+[mcp_servers.edgedefense]
+command = "edgedefense-mcp"
+args = []
+```
+
+**VS Code / Copilot** — `.vscode/mcp.json`
+
+```json
+{
+  "servers": {
+    "edgedefense": {
+      "command": "edgedefense-mcp"
+    }
+  }
+}
 ```
 
 Restart your client and ask: *"What's on my network?"*
 
+Any other MCP client works too — the command is `edgedefense-mcp`, it takes no
+arguments, and it speaks stdio.
+
 <details>
 <summary>Config file locations</summary>
 
-| Platform | Path |
+| Client | Path |
 |---|---|
-| macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
-| Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
-| Linux | `~/.config/Claude/claude_desktop_config.json` |
+| Claude Desktop (macOS) | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Claude Desktop (Windows) | `%APPDATA%\Claude\claude_desktop_config.json` |
+| Claude Desktop (Linux) | `~/.config/Claude/claude_desktop_config.json` |
+| Cursor | `~/.cursor/mcp.json` |
+| Codex CLI | `~/.codex/config.toml` |
+| VS Code | `.vscode/mcp.json` (workspace) |
+
+Note the key name differs by client: VS Code uses `servers`, everything else
+above uses `mcpServers`, and Codex uses a TOML `[mcp_servers.<name>]` table.
+
+</details>
+
+<details>
+<summary>Client says "command not found"</summary>
+
+Desktop apps often don't see the same `PATH` your terminal does, which matters
+if you installed into a virtual environment. Locate the executable with
+`which edgedefense-mcp` (macOS/Linux) or `where edgedefense-mcp` (Windows), then
+use that full path as `command`. Alternatively point `command` at your Python
+interpreter with `"args": ["-m", "edgedefense_mcp"]`, which sidesteps `PATH`
+entirely.
 
 </details>
 
