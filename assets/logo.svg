@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400" role="img" aria-label="EdgeDefense">
+  <title>EdgeDefense</title>
+  <!--
+    Faceted navigation arrow. Three flat planes, no gradients, so it stays
+    legible when scaled down to a favicon. Greys read correctly on both light
+    and dark backgrounds, which is why the mark carries no colour of its own.
+  -->
+  <g>
+    <!-- Upper wing: the broad, lightest plane sweeping back to the left -->
+    <polygon points="60,150 330,88 205,190" fill="#B4B4B4"/>
+    <!-- Underside of the wing: a narrow darker sliver giving the fold depth -->
+    <polygon points="60,150 205,190 196,168" fill="#6E6E6E"/>
+    <!-- Body: the dark plane falling from the tip down to the tail -->
+    <polygon points="330,88 232,320 205,190" fill="#5C5C5C"/>
+    <!-- Inner edge catching the light, separating body from wing -->
+    <polygon points="330,88 205,190 214,205" fill="#9A9A9A"/>
+  </g>
+</svg>

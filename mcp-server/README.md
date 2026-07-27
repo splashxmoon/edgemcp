@@ -91,6 +91,23 @@ Restart your client and ask: *"What's on my network?"*
 Any other MCP client works too — the command is `edgedefense-mcp`, it takes no
 arguments, and it speaks stdio.
 
+**Remote connector (claude.ai)** — for clients that take a URL instead of a
+command:
+
+```bash
+edgedefense-mcp --http --port 8765 --token "$(python -c 'import secrets;print(secrets.token_urlsafe(32))')" --allow-host mcp.edgedefenseai.com
+cloudflared tunnel --url http://127.0.0.1:8765
+```
+
+Paste the printed `https://<host>/t/<token>/mcp` URL into the connector dialog
+and leave the OAuth fields empty.
+
+The server must still run on a machine in your home — it can only see the
+network it sits on, so hosting it elsewhere would scan that host instead. The
+URL grants a full inventory of your network, so treat it as a password. See the
+[root README](../README.md#remote-connector-claudeai-add-custom-connector) for
+the full explanation.
+
 <details>
 <summary>Config file locations</summary>
 

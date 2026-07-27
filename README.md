@@ -1,6 +1,11 @@
+<img src="assets/logo.svg" alt="EdgeDefense" width="88" align="left" hspace="12" vspace="4">
+
 # EdgeDefense MCP
 
 **Ask Claude about your home network.** Runs entirely on your machine — no account, no cloud, no admin rights.
+
+<br clear="left">
+
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
@@ -113,6 +118,48 @@ args = []
 
 Restart your client afterwards. Any other MCP client works too — the command is
 `edgedefense-mcp`, it takes no arguments, and it speaks stdio.
+
+### Remote connector (claude.ai "Add custom connector")
+
+That dialog asks for a URL rather than a command, which means the server has to
+be reachable over HTTP.
+
+**The server must still run on a machine in your home.** It identifies devices
+by reading the local address table and listening for the announcements devices
+broadcast on the local link — so it can only ever see the network it is sitting
+on. Hosting it on a VPS would work perfectly and tell you about the VPS's
+network, which is not what you want. The arrangement that makes sense is a
+tunnel from a public hostname back to a machine at home.
+
+Start the server in HTTP mode with a token:
+
+```bash
+edgedefense-mcp --http --port 8765 --token "$(python -c 'import secrets;print(secrets.token_urlsafe(32))')" --allow-host mcp.edgedefenseai.com
+```
+
+Point a tunnel at it:
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:8765
+```
+
+Then paste the printed endpoint into the connector dialog:
+
+```
+https://mcp.edgedefenseai.com/t/<your-token>/mcp
+```
+
+Leave the OAuth fields empty. The dialog has nowhere to put a header, so the
+token travels in the path instead.
+
+> **The URL is a password.** Anyone holding it gets a full inventory of your
+> home network. Don't put it anywhere you wouldn't put a password, and rotate
+> it by restarting with a new `--token`.
+
+Binding to anything other than loopback without a token is refused; the server
+generates one and prints it rather than exposing your network anonymously.
+`--allow-host` must name the hostname clients will actually use, or the
+DNS-rebinding check rejects the request. `edgedefense-mcp --help` lists the rest.
 
 <details>
 <summary>Where is the Claude Desktop config file?</summary>

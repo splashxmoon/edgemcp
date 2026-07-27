@@ -15,7 +15,14 @@ __all__ = ["__version__", "main"]
 
 
 def main() -> None:
-    """Console-script entry point (``edgedefense-mcp``)."""
-    from .server import main as _main
+    """Console-script entry point (``edgedefense-mcp``).
 
-    _main()
+    Delegates to the CLI, which defaults to stdio. Importing the CLI rather
+    than the server keeps ``--help`` and ``--version`` fast, since neither
+    needs the server constructed.
+    """
+    import sys
+
+    from .cli import main as _main
+
+    sys.exit(_main())
