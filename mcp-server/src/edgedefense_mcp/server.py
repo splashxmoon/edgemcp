@@ -21,6 +21,7 @@ from enum import Enum
 from typing import Annotated, Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import Icon
 from pydantic import Field
 
 from edgedefense_core import __version__ as core_version
@@ -81,8 +82,53 @@ def _disable_dotenv_loading() -> None:
 
 _disable_dotenv_loading()
 
+
+def _advertise_our_own_version(server: Any, version: str) -> None:
+    """Report this project's version rather than the MCP SDK's.
+
+    FastMCP does not accept a version, and the low-level server falls back to
+    ``importlib.metadata.version("mcp")`` when none is set. The result is that
+    every client is told the server is version 1.28.1 -- the SDK's number.
+    That is actively misleading: it moves when a dependency is upgraded and
+    stays still when this code changes, which is backwards for anyone trying to
+    work out which build they are talking to.
+    """
+    try:
+        server._mcp_server.version = version
+    except AttributeError:
+        # A future SDK layout may move this. Being unable to set a version is
+        # no reason to refuse to start; the test catches the regression.
+        pass
+
+
+#: Shown by directories and connector UIs next to the server's name.
+HOMEPAGE = "https://www.edgedefenseai.com"
+
+#: The logo, served from the project site. Remote URLs rather than data URIs
+#: because connector UIs cache by URL, and inlining an icon into every
+#: initialize response is paid for again on each reconnect.
+#:
+#: Both filenames must exist under the site's public/ directory. A 404 here is
+#: invisible from the server's side -- the client simply shows no icon and
+#: nothing is logged anywhere you would look.
+ICONS = [
+    Icon(
+        src=f"{HOMEPAGE}/logo-favicon.svg",
+        mimeType="image/svg+xml",
+        sizes=["any"],
+    ),
+    # A raster fallback for clients that will not render SVG.
+    Icon(
+        src=f"{HOMEPAGE}/logo.png",
+        mimeType="image/png",
+        sizes=["512x512"],
+    ),
+]
+
 mcp = FastMCP(
     "edgedefense_mcp",
+    website_url=HOMEPAGE,
+    icons=ICONS,
     instructions=(
         "Answers questions about the user's home network: what is connected, what each "
         "device is, what looks unusual, and what any finding actually means.\n\n"
@@ -102,6 +148,8 @@ mcp = FastMCP(
         "reads local state or talks only to the user's own network."
     ),
 )
+
+_advertise_our_own_version(mcp, __version__)
 
 
 # --------------------------------------------------------------------------
