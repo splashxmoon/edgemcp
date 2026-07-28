@@ -45,12 +45,17 @@ src/edgedefense_core/
 ├── classify.py         Best-guess device typing, with confidence levels
 ├── findings.py         Observations → findings, plus all explanation copy
 ├── scoring.py          The 0–100 trust score
+├── local_checks.py     Wi-Fi security, DNS, and local port exposure checks
+├── changes.py          Scan history diffing (new devices, vanished, ports)
 ├── storage.py          Local SQLite persistence
 ├── util.py             Small shared formatting helpers
 ├── data/oui.csv        Bundled vendor database
 ├── discovery/
 │   ├── arp.py          ARP table reading + UDP sweep to populate it
 │   ├── mdns.py         Dependency-free mDNS client and DNS parser
+│   ├── ssdp.py         UPnP/SSDP multicast discovery
+│   ├── netbios.py      NetBIOS name resolution for legacy/Windows hosts
+│   ├── http_tls.py     HTTP titles and TLS certificate Common Names
 │   └── ports.py        TCP connect fingerprinting
 ```
 
@@ -74,7 +79,7 @@ asyncio.run(main())
 
 ## How discovery works
 
-Three independent methods, run concurrently. Any one can fail without aborting
+Multiple independent methods, run concurrently. Any one can fail without aborting
 the scan; a failure reduces detail and is reported as a warning.
 
 1. **ARP sweep.** Sends one empty UDP datagram to port 9 (discard) on each
@@ -86,8 +91,11 @@ the scan; a failure reduces detail and is reported as a warning.
    directly. Binding port 5353 is attempted opportunistically for better
    coverage; failing to (because Bonjour or Avahi owns it) is expected and
    non-fatal.
-3. **TCP fingerprinting.** Ordinary `connect()` calls to 12 ports (quick) or 42
+3. **SSDP/UPnP.** Multicasts M-SEARCH over UDP to discover smart devices, speakers, and media servers.
+4. **NetBIOS.** Active unicast NetBIOS name requests to identify Windows machines and legacy hardware.
+5. **TCP fingerprinting.** Ordinary `connect()` calls to 12 ports (quick) or 42
    ports (full). No payload is sent and the socket closes immediately.
+6. **HTTP/TLS.** Extracts `<title>` tags from root HTTP pages and Common Names (CN) from TLS certificates on open web ports.
 
 Evidence is then merged per address and weighted, most reliable first:
 mDNS service types → hostname keywords → open ports → vendor name.

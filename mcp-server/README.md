@@ -189,8 +189,11 @@ on your local network. Roughly the traffic of loading one web page.
 | Tool | What it does |
 |---|---|
 | `edgedefense_scan_network` | Discover devices and summarise the network. **Start here.** |
+| `edgedefense_whats_changed` | Tells you what's new on your network, what vanished, and what ports opened since last scan |
 | `edgedefense_list_devices` | List devices, filtered by `all` / `unknown` / `flagged` |
 | `edgedefense_get_device_detail` | Everything known about one device |
+| `edgedefense_name_device` | Assigns a friendly name to a device so you can track it |
+| `edgedefense_local_security` | Checks the Wi-Fi security, DNS, and open ports on the machine running the server |
 | `edgedefense_get_trust_score` | The 0–100 score, with reasons |
 | `edgedefense_explain_finding` | Turn a flagged issue into a plain-English explanation |
 

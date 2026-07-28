@@ -38,8 +38,11 @@ It is also **read-only by design**. There is deliberately no "block this device"
 | Tool | What you get |
 |---|---|
 | `edgedefense_scan_network` | Finds everything on your network and summarises it in plain English. **Start here.** |
+| `edgedefense_whats_changed` | Tells you what's new on your network, what vanished, and what ports opened since last scan |
 | `edgedefense_list_devices` | Lists what's connected — filter to just the unknown ones, or just the ones with problems |
 | `edgedefense_get_device_detail` | Everything known about one device: what it probably is, who made it, what it's running |
+| `edgedefense_name_device` | Assigns a friendly name to a device so you can track it |
+| `edgedefense_local_security` | Checks the Wi-Fi security, DNS, and open ports on the machine running the server |
 | `edgedefense_get_trust_score` | A single 0–100 score for your network, with the reasons behind it |
 | `edgedefense_explain_finding` | Turns any flagged issue into a plain-English explanation of what it means and what to do |
 
