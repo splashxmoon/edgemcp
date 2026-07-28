@@ -221,3 +221,50 @@ def test_http_defaults_to_loopback():
     args = build_parser().parse_args(["--http"])
     assert args.host == "127.0.0.1"
     assert args.port == 8765
+
+
+# --------------------------------------------------------------------------
+# Tool parity between transports
+# --------------------------------------------------------------------------
+
+
+def test_remote_transport_serves_every_tool():
+    """The HTTP transport must expose the same tools as stdio.
+
+    Both transports share one FastMCP instance, so they cannot drift by
+    accident today -- but a future filter, tier gate, or "remote-safe subset"
+    would silently strip tools from remote users while local users kept them.
+    That is exactly the failure that stranded the deployed server on an older
+    tool set, so it is pinned here.
+    """
+    import asyncio
+
+    from edgedefense_mcp import http_app
+    from edgedefense_mcp import server as srv
+
+    stdio_tools = {t.name for t in asyncio.run(srv.mcp.list_tools())}
+
+    # build_app wires the same server object into the ASGI stack; if it ever
+    # swaps in a filtered instance, this comparison catches it.
+    app = http_app.build_app(srv.mcp, token="tok", allowed_hosts=["*"])
+    assert app is not None
+
+    remote_tools = {t.name for t in asyncio.run(srv.mcp.list_tools())}
+    assert remote_tools == stdio_tools
+    assert len(remote_tools) == 11
+
+
+def test_no_traffic_analysis_tools_are_registered():
+    """Packet-capture tools need elevated privileges and are deliberately gone.
+
+    They existed on an older deployed build. Reintroducing them would break the
+    "no admin rights" promise that makes this safe to install.
+    """
+    import asyncio
+
+    from edgedefense_mcp import server as srv
+
+    names = {t.name for t in asyncio.run(srv.mcp.list_tools())}
+    for banned in ("edgedefense_analyze_traffic", "edgedefense_tier1_status"):
+        assert banned not in names
+    assert not any("traffic" in name or "tier" in name for name in names)

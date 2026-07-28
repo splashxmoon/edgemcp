@@ -176,7 +176,7 @@ radio's view of the air around it.
   | Linux | `~/.local/share/edgedefense/edgedefense.sqlite3` |
 
 You do not have to take this on faith — the source is right here, and
-`edgedefense_core` has zero runtime dependencies for the default tier. Reading
+`edgedefense_core` has zero runtime dependencies. Reading
 `core-engine/src/edgedefense_core/` end to end is a short afternoon.
 
 **What it does put on the wire:** to find devices, it sends one empty UDP
@@ -189,7 +189,7 @@ on your local network. Roughly the traffic of loading one web page.
 
 ## What it can tell you
 
-### Tier 0 — the default, no special permissions
+### Everything below works as a normal user
 
 | | |
 |---|---|
