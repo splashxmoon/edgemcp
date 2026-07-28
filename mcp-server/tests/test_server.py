@@ -104,15 +104,26 @@ def run(coro):
 def test_every_tool_is_registered_read_only():
     """Nothing in the free tier may modify the network."""
     tools = run(srv.mcp.list_tools())
-    assert len(tools) == 8
+    assert len(tools) == 11
     for tool in tools:
         if tool.name == "edgedefense_name_device":
             assert tool.annotations.readOnlyHint is False, tool.name
         else:
             assert tool.annotations.readOnlyHint is True, tool.name
         assert tool.annotations.destructiveHint is False, tool.name
-        # Everything runs locally; nothing reaches an external service.
-        assert tool.annotations.openWorldHint is False, tool.name
+
+
+def test_only_the_speed_test_reaches_outside_this_machine():
+    """The privacy claim, expressed as an assertion.
+
+    Measuring throughput genuinely requires transferring data with an internet
+    server, so one tool is exempt. That exemption is the entire cost of the
+    feature, and it must not silently spread: openWorldHint is how a client
+    tells the user an action leaves their machine.
+    """
+    tools = run(srv.mcp.list_tools())
+    outward = {tool.name for tool in tools if tool.annotations.openWorldHint}
+    assert outward == {"edgedefense_speed_test"}
 
 
 def test_no_destructive_tool_exists():
@@ -228,3 +239,186 @@ def test_tools_direct_the_user_to_scan_when_nothing_is_cached(monkeypatch, tmp_p
 
     for tool in ("edgedefense_list_devices", "edgedefense_get_trust_score"):
         assert "edgedefense_scan_network" in run(call(tool))
+
+
+# --------------------------------------------------------------------------
+# Performance tools
+# --------------------------------------------------------------------------
+#
+# These stub the measurement layer. The point under test is the tool contract --
+# schema, formatting, JSON shape -- not the network, which the core engine's
+# own suite covers against captured console output.
+
+
+def test_network_stats_reports_live_rates_and_wifi(monkeypatch):
+    from edgedefense_core.perf import interfaces as core_interfaces
+    from edgedefense_core.perf import wifi as core_wifi
+
+    report = core_interfaces.InterfaceReport(
+        sample_seconds=2.0,
+        interfaces=[
+            core_interfaces.InterfaceStats(
+                name="Wi-Fi",
+                description="Intel(R) Wi-Fi 6 AX201",
+                is_up=True,
+                link_speed_mbps=866.0,
+                mtu=1500,
+                bytes_recv=90_000_000,
+                bytes_sent=40_000_000,
+                packets_recv=50_000,
+                packets_sent=25_000,
+                errors_in=0,
+                errors_out=0,
+                drops_in=0,
+                drops_out=0,
+                recv_rate_bps=24_000_000.0,
+                send_rate_bps=1_500_000.0,
+            )
+        ],
+    )
+    radio = core_wifi.WifiReport(
+        link=core_wifi.WifiLink(
+            ssid="Foxglove", band="5 GHz", channel=44, signal_dbm=-58.0,
+            signal_percent=84, rx_rate_mbps=866.0, tx_rate_mbps=866.0,
+        ),
+        nearby=[core_wifi.NearbyNetwork(ssid="Neighbour", channel=44)],
+    )
+
+    async def fake_sample(seconds):
+        return report
+
+    async def fake_wifi(include_nearby=True):
+        return radio
+
+    monkeypatch.setattr(core_interfaces, "sample_interfaces", fake_sample)
+    monkeypatch.setattr(core_wifi, "collect_wifi", fake_wifi)
+
+    out = run(call("edgedefense_network_stats"))
+    assert "24.0 Mbps down" in out
+    assert "1.5 Mbps up" in out
+    assert "Foxglove" in out
+    assert "-58 dBm" in out
+    assert "No packet errors" in out
+
+
+def test_network_stats_json_shape(monkeypatch):
+    from edgedefense_core.perf import interfaces as core_interfaces
+    from edgedefense_core.perf import wifi as core_wifi
+
+    async def fake_sample(seconds):
+        return core_interfaces.InterfaceReport(
+            sample_seconds=1.0,
+            interfaces=[core_interfaces.InterfaceStats(name="eth0", is_up=True)],
+        )
+
+    async def fake_wifi(include_nearby=True):
+        return core_wifi.WifiReport()
+
+    monkeypatch.setattr(core_interfaces, "sample_interfaces", fake_sample)
+    monkeypatch.setattr(core_wifi, "collect_wifi", fake_wifi)
+
+    payload = json.loads(
+        run(call("edgedefense_network_stats", {"response_format": "json"}))
+    )
+    assert payload["interfaces"]["interfaces"][0]["name"] == "eth0"
+    assert payload["wifi"]["link"] is None
+
+
+def test_network_stats_can_skip_wifi(monkeypatch):
+    """include_wifi=False must not run the radio scan at all."""
+    from edgedefense_core.perf import interfaces as core_interfaces
+    from edgedefense_core.perf import wifi as core_wifi
+
+    async def fake_sample(seconds):
+        return core_interfaces.InterfaceReport(interfaces=[])
+
+    def explode(**kwargs):
+        raise AssertionError("Wi-Fi was scanned despite include_wifi=False")
+
+    monkeypatch.setattr(core_interfaces, "sample_interfaces", fake_sample)
+    monkeypatch.setattr(core_wifi, "collect_wifi", explode)
+
+    out = run(call("edgedefense_network_stats", {"include_wifi": False}))
+    assert "No active network adapter" in out
+
+
+def test_latency_check_renders_round_trips(monkeypatch):
+    from edgedefense_core.perf import latency as core_latency
+
+    async def fake_check(count=5, include_dns=True):
+        return core_latency.LatencyReport(
+            gateway=core_latency.PingResult(
+                host="192.168.1.1", label="your router", sent=5, received=5,
+                samples_ms=[1.2, 1.4, 1.1, 1.5, 1.3],
+            ),
+            dns=[core_latency.DnsResult(server="192.168.1.1", samples_ms=[8.0, 9.0])],
+        )
+
+    monkeypatch.setattr(core_latency, "run_latency_check", fake_check)
+
+    out = run(call("edgedefense_latency_check"))
+    assert "192.168.1.1" in out
+    assert "1.3 ms average" in out
+    assert "healthy wired or strong Wi-Fi link" in out
+
+
+def test_speed_test_output_states_that_it_left_the_machine(monkeypatch):
+    """The one outbound tool must say so in its own output, every time."""
+    from edgedefense_core.perf import speedtest as core_speedtest
+
+    async def fake_test(duration=6.0, streams=4, include_upload=True):
+        return core_speedtest.SpeedTestResult(
+            download_mbps=412.5,
+            upload_mbps=38.2,
+            idle_latency_ms=9.0,
+            jitter_ms=1.0,
+            loaded_latency_ms=310.0,
+            bufferbloat_ms=301.0,
+            bytes_downloaded=310_000_000,
+            bytes_uploaded=29_000_000,
+            download_streams=4,
+            upload_streams=3,
+            server_location="London, GB",
+            server_colo="LHR",
+            duration_seconds=14.0,
+        )
+
+    monkeypatch.setattr(core_speedtest, "run_speed_test", fake_test)
+
+    out = run(call("edgedefense_speed_test"))
+    assert "412.5 Mbps down / 38.2 Mbps up" in out
+    assert "speed.cloudflare.com" in out
+    assert "leaves your machine" in out
+    # A 301 ms rise under load is grade D and must be explained, not buried.
+    assert "grade **D**" in out
+    assert "bufferbloat" in out.lower()
+
+
+def test_speed_test_reports_failure_without_raising(monkeypatch):
+    from edgedefense_core.perf import speedtest as core_speedtest
+
+    async def fake_test(duration=6.0, streams=4, include_upload=True):
+        return core_speedtest.SpeedTestResult(
+            warnings=["The endpoint did not respond, so no measurement could be taken."]
+        )
+
+    monkeypatch.setattr(core_speedtest, "run_speed_test", fake_test)
+
+    out = run(call("edgedefense_speed_test"))
+    assert "could not complete" in out
+    assert "did not respond" in out
+
+
+def test_speed_test_json_never_carries_a_public_ip(monkeypatch):
+    from edgedefense_core.perf import speedtest as core_speedtest
+
+    async def fake_test(duration=6.0, streams=4, include_upload=True):
+        return core_speedtest.SpeedTestResult(
+            download_mbps=100.0, server_location="London, GB", server_colo="LHR"
+        )
+
+    monkeypatch.setattr(core_speedtest, "run_speed_test", fake_test)
+
+    payload = json.loads(run(call("edgedefense_speed_test", {"response_format": "json"})))
+    assert payload["download_mbps"] == 100.0
+    assert "ip" not in {key.lower() for key in payload}

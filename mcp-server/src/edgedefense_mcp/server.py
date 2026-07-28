@@ -38,8 +38,11 @@ from .formatting import (
     format_device_detail,
     format_device_list,
     format_finding_explanation,
+    format_latency,
     format_local_security,
+    format_network_stats,
     format_scan_summary,
+    format_speed_test,
     format_trust_score,
     to_json,
 )
@@ -87,8 +90,16 @@ mcp = FastMCP(
         "most recent scan. Findings are referenced by a stable finding_id; pass that to "
         "edgedefense_explain_finding for a plain-English explanation. Use "
         "edgedefense_whats_changed to compare the latest scan with the previous one.\n\n"
-        "This server runs entirely locally. It makes no outbound network requests, "
-        "collects no telemetry, and requires no account. No elevated privileges needed."
+        "It also answers performance questions. For 'why is my network slow', prefer "
+        "edgedefense_network_stats (adapter throughput, Wi-Fi signal, channel "
+        "congestion) and edgedefense_latency_check (round trip to the router, DNS "
+        "timing) - both are local and fast. Reach for edgedefense_speed_test only when "
+        "the user actually wants a throughput number in Mbps.\n\n"
+        "This server runs locally and requires no account, no telemetry and no "
+        "elevated privileges. Exactly one tool leaves the machine: "
+        "edgedefense_speed_test contacts a public speed test service, because "
+        "measuring download speed is impossible without doing so. Every other tool "
+        "reads local state or talks only to the user's own network."
     ),
 )
 
@@ -807,6 +818,381 @@ async def edgedefense_name_device(
 
 
 # --------------------------------------------------------------------------
+# Performance tools
+# --------------------------------------------------------------------------
+
+
+@mcp.tool(
+    name="edgedefense_network_stats",
+    annotations={
+        "title": "Network adapter and Wi-Fi status",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    },
+)
+async def edgedefense_network_stats(
+    sample_seconds: Annotated[
+        float,
+        Field(
+            description=(
+                "How long to watch traffic to compute the live throughput rate. "
+                "2 seconds is a good default; longer is steadier but slower"
+            ),
+            ge=0.5,
+            le=30.0,
+        ),
+    ] = 2.0,
+    include_wifi: Annotated[
+        bool,
+        Field(
+            description=(
+                "Also report Wi-Fi signal strength, band, channel and how many nearby "
+                "networks share that channel. Adds a few seconds"
+            )
+        ),
+    ] = True,
+    response_format: FormatParam = ResponseFormat.MARKDOWN,
+) -> str:
+    """Report how each network adapter is performing right now.
+
+    Covers current upload and download throughput per adapter, cumulative
+    traffic, link speed, MTU, and packet error and drop rates. With Wi-Fi
+    included, it also reports signal strength in dBm, the band and channel in
+    use, the negotiated radio rate, and how many neighbouring networks are
+    competing for the same channel.
+
+    This is the right first stop for "my internet is slow", because it
+    distinguishes a weak or crowded Wi-Fi link from an actual problem with the
+    internet connection. Those have completely different fixes, and a speed
+    test alone cannot tell them apart.
+
+    Everything here is read from counters the operating system already keeps.
+    Nothing is transmitted.
+
+    Args:
+        sample_seconds (float): seconds to watch traffic for the live rate.
+            Default 2.0.
+        include_wifi (bool): include Wi-Fi link quality and channel congestion.
+            Default True.
+        response_format (ResponseFormat): 'markdown' or 'json'. Default 'markdown'.
+
+    Returns:
+        str: In markdown mode, a report of each active adapter's current and
+        cumulative traffic and error rate, followed by the Wi-Fi link and any
+        specific, measured advice about it.
+
+        In json mode:
+        {
+            "interfaces": {
+                "sample_seconds": float,
+                "interfaces": [
+                    {
+                        "name": str,
+                        "description": str | null,
+                        "is_up": bool,
+                        "mac": str | null,
+                        "mtu": int | null,
+                        "link_speed_mbps": float | null,
+                        "bytes_sent": int | null,
+                        "bytes_recv": int | null,
+                        "packets_sent": int | null,
+                        "packets_recv": int | null,
+                        "errors_in": int | null,
+                        "errors_out": int | null,
+                        "drops_in": int | null,
+                        "drops_out": int | null,
+                        "error_rate": float | null,   # 0.0-1.0, null if unknown
+                        "is_virtual": bool,
+                        "send_rate_bps": float | null,
+                        "recv_rate_bps": float | null
+                    }
+                ],
+                "warnings": [str]
+            },
+            "wifi": {
+                "link": {
+                    "ssid": str | null,
+                    "bssid": str | null,
+                    "band": str | null,           # "2.4 GHz" | "5 GHz" | "6 GHz"
+                    "channel": int | null,
+                    "signal_percent": int | null,
+                    "signal_dbm": float | null,
+                    "signal_quality": str | null, # "excellent".."very weak"
+                    "rx_rate_mbps": float | null,
+                    "tx_rate_mbps": float | null,
+                    "radio_type": str | null,
+                    "authentication": str | null
+                } | null,
+                "nearby_count": int,
+                "nearby": [ {"ssid": str, "channel": int, "band": str, "signal_percent": int} ],
+                "channel_usage": [ {"channel": int, "networks": int} ],
+                "same_channel_networks": int | null,
+                "advice": [str],
+                "warnings": [str]
+            } | null
+        }
+
+    Examples:
+        - Use when: "Why is my network slow?" -> defaults
+        - Use when: "How strong is my Wi-Fi signal?" -> defaults
+        - Use when: "What's using my bandwidth right now?" -> sample_seconds=5
+        - Don't use when: the user wants a speed in Mbps against the internet -
+          use edgedefense_speed_test
+
+    Error Handling:
+        Never raises for network conditions. A machine on Ethernet reports no
+        Wi-Fi link, which is a normal result rather than an error. Platforms
+        that do not expose a given counter report null for it rather than zero,
+        so a missing counter is never mistaken for a healthy one.
+    """
+    from edgedefense_core.perf.interfaces import sample_interfaces
+    from edgedefense_core.perf.wifi import collect_wifi
+
+    interfaces = await sample_interfaces(sample_seconds)
+    wifi = await collect_wifi(include_nearby=True) if include_wifi else None
+
+    if response_format == ResponseFormat.JSON:
+        return to_json(
+            {
+                "interfaces": interfaces.to_dict(),
+                "wifi": wifi.to_dict() if wifi else None,
+            }
+        )
+
+    return format_network_stats(interfaces, wifi)
+
+
+@mcp.tool(
+    name="edgedefense_latency_check",
+    annotations={
+        "title": "Measure latency and DNS response time",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    },
+)
+async def edgedefense_latency_check(
+    count: Annotated[
+        int,
+        Field(
+            description="How many pings to send to the router. More is steadier",
+            ge=1,
+            le=20,
+        ),
+    ] = 5,
+    include_dns: Annotated[
+        bool,
+        Field(
+            description=(
+                "Also time a name lookup against each DNS server this machine is "
+                "configured to use"
+            )
+        ),
+    ] = True,
+    response_format: FormatParam = ResponseFormat.MARKDOWN,
+) -> str:
+    """Measure the round trip to your router, and how fast names resolve.
+
+    Reports minimum, average and maximum round-trip time to the default
+    gateway, jitter between consecutive packets, and packet loss. With DNS
+    included, it times a lookup against each configured resolver.
+
+    These two numbers separate the two common causes of "everything feels
+    slow". High latency to your own router is a local wireless problem. Fast
+    router latency with slow DNS is a resolver problem, and shows up as a pause
+    before every new site loads while everything already open stays fast.
+
+    Packets go only to your own gateway and to the DNS servers this machine
+    already uses. No third-party service is contacted.
+
+    Args:
+        count (int): pings to send to the gateway. Default 5.
+        include_dns (bool): also time DNS lookups. Default True.
+        response_format (ResponseFormat): 'markdown' or 'json'. Default 'markdown'.
+
+    Returns:
+        str: In markdown mode, the round-trip figures, per-resolver timings, and
+        a short plain-language reading of what those numbers imply.
+
+        In json mode:
+        {
+            "gateway": {
+                "host": str,
+                "sent": int,
+                "received": int,
+                "loss_percent": float | null,
+                "min_ms": float | null,
+                "avg_ms": float | null,
+                "max_ms": float | null,
+                "jitter_ms": float | null,
+                "samples_ms": [float],
+                "error": str | null
+            } | null,
+            "dns": [
+                {
+                    "server": str,
+                    "query": str,
+                    "avg_ms": float | null,
+                    "min_ms": float | null,
+                    "max_ms": float | null,
+                    "failures": int,
+                    "error": str | null
+                }
+            ],
+            "verdict": [str],
+            "warnings": [str]
+        }
+
+    Examples:
+        - Use when: "Why do my video calls keep stuttering?" -> count=10
+        - Use when: "Is my DNS slow?" -> defaults
+        - Use when: "Is the problem my Wi-Fi or my ISP?" -> defaults, then read
+          the gateway figures
+        - Don't use when: the user wants throughput in Mbps - use
+          edgedefense_speed_test
+
+    Error Handling:
+        Never raises. Many routers are configured not to answer pings; that is
+        reported as an inconclusive result rather than as a fault, because it
+        genuinely is not one.
+    """
+    from edgedefense_core.perf.latency import run_latency_check
+
+    report = await run_latency_check(count=count, include_dns=include_dns)
+
+    if response_format == ResponseFormat.JSON:
+        return to_json(report.to_dict())
+
+    return format_latency(report)
+
+
+@mcp.tool(
+    name="edgedefense_speed_test",
+    annotations={
+        "title": "Internet speed test (contacts an external service)",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        # The only tool in this server for which this is true. Clients use this
+        # to decide whether an action reaches beyond the local machine.
+        "openWorldHint": True,
+    },
+)
+async def edgedefense_speed_test(
+    duration: Annotated[
+        float,
+        Field(
+            description=(
+                "Seconds to spend on each of the download and upload phases. "
+                "6 is enough for an accurate reading on most connections"
+            ),
+            ge=2.0,
+            le=30.0,
+        ),
+    ] = 6.0,
+    include_upload: Annotated[
+        bool,
+        Field(
+            description="Measure upload as well as download. Roughly doubles the runtime"
+        ),
+    ] = True,
+    streams: Annotated[
+        int,
+        Field(
+            description=(
+                "Parallel connections. A single connection cannot fill a fast link, so "
+                "lowering this will under-report gigabit connections"
+            ),
+            ge=1,
+            le=16,
+        ),
+    ] = 4,
+    response_format: FormatParam = ResponseFormat.MARKDOWN,
+) -> str:
+    """Measure real download and upload speed, latency, and bufferbloat.
+
+    **This is the only tool in EdgeDefense that contacts the internet.** Every
+    other tool reads local state or talks only to the user's own network. This
+    one has to transfer real data to and from Cloudflare's public speed test
+    service, because throughput cannot be measured any other way. It needs no
+    account or API key, and no identifying information is attached beyond what
+    any HTTPS request unavoidably reveals. The user's public IP address is
+    deliberately excluded from the result.
+
+    It transfers a meaningful amount of data - typically tens to hundreds of
+    megabytes - so it is worth avoiding on a metered or capped connection.
+
+    Alongside throughput it measures bufferbloat: how much latency rises while
+    the connection is saturated. That number, not the download figure, is
+    usually what explains a call breaking up when someone else starts a
+    download, and it is fixed in the router rather than by buying more speed.
+
+    Args:
+        duration (float): seconds per phase. Default 6.0.
+        include_upload (bool): measure upload too. Default True.
+        streams (int): parallel connections. Default 4.
+        response_format (ResponseFormat): 'markdown' or 'json'. Default 'markdown'.
+
+    Returns:
+        str: In markdown mode, the headline speeds, latency under load with a
+        bufferbloat grade, what the measured connection can realistically
+        support, and how the measurement was taken.
+
+        In json mode:
+        {
+            "download_mbps": float | null,
+            "upload_mbps": float | null,
+            "idle_latency_ms": float | null,
+            "jitter_ms": float | null,
+            "loaded_latency_ms": float | null,
+            "bufferbloat_ms": float | null,
+            "bufferbloat_grade": str | null,   # "A+" .. "F"
+            "bytes_downloaded": int,
+            "bytes_uploaded": int,
+            "download_streams": int,
+            "upload_streams": int,
+            "server_location": str | null,
+            "server_colo": str | null,
+            "endpoint": str,
+            "duration_seconds": float | null,
+            "capability_notes": [str],
+            "warnings": [str]
+        }
+
+    Examples:
+        - Use when: "How fast is my internet?" -> defaults
+        - Use when: "Am I getting the speed I pay for?" -> defaults
+        - Use when: "Why do calls break up when someone downloads?" ->
+          defaults, then read bufferbloat_grade
+        - Don't use when: the user asked why the network feels slow without
+          asking for a number - edgedefense_network_stats and
+          edgedefense_latency_check diagnose that locally, in less time, and
+          without sending anything
+
+    Error Handling:
+        Never raises for network conditions. If the endpoint is unreachable the
+        result comes back with null speeds and an explanation in warnings,
+        rather than an exception. A phase that fails does not prevent the
+        others from being reported.
+    """
+    from edgedefense_core.perf.speedtest import run_speed_test
+
+    result = await run_speed_test(
+        duration=duration,
+        streams=streams,
+        include_upload=include_upload,
+    )
+
+    if response_format == ResponseFormat.JSON:
+        return to_json(result.to_dict())
+
+    return format_speed_test(result)
+
+
+# --------------------------------------------------------------------------
 # Resources
 # --------------------------------------------------------------------------
 
@@ -814,10 +1200,11 @@ async def edgedefense_name_device(
 @mcp.resource("edgedefense://privacy")
 def privacy_statement() -> str:
     """The tool's privacy guarantees, and where its data lives."""
+    from edgedefense_core.perf.speedtest import DEFAULT_ENDPOINT as speed_endpoint
+
     storage_info: Dict[str, Any] = get_storage().describe()
     return (
         "# EdgeDefense privacy\n\n"
-        "- No outbound network requests are made by this tool, for any purpose.\n"
         "- No analytics, no telemetry, no crash reporting, no account.\n"
         "- Manufacturer lookups use a vendor database bundled on disk "
         f"({oui_database_size()} entries), never a remote API.\n"
@@ -826,6 +1213,22 @@ def privacy_statement() -> str:
         f"- Devices remembered: {storage_info['devices_known']}; "
         f"scans stored: {storage_info['scans_stored']}.\n"
         "- Deleting that file erases all history. Nothing is retained elsewhere.\n\n"
+        "## What leaves this machine\n\n"
+        "One tool, and only when you invoke it:\n\n"
+        f"- **edgedefense_speed_test** transfers data to and from `{speed_endpoint}` "
+        "to measure throughput. There is no way to measure download speed without "
+        "doing this. No account, no API key, and nothing identifying is attached "
+        "beyond what any HTTPS request unavoidably reveals. The service sees the "
+        "requesting IP address, as every server does; that address is deliberately "
+        "left out of the result the tool returns.\n\n"
+        "Everything else is local:\n\n"
+        "- Discovery, classification, scoring and the local security checks read "
+        "state this machine already holds, or listen for announcements devices "
+        "broadcast on the LAN.\n"
+        "- **edgedefense_latency_check** sends packets, but only to your own router "
+        "and to the DNS servers this machine is already configured to use.\n"
+        "- **edgedefense_network_stats** transmits nothing at all; it reads operating "
+        "system counters and the wireless radio's view of the air around it.\n\n"
         f"Engine version {core_version}, server version {__version__}.\n"
     )
 
