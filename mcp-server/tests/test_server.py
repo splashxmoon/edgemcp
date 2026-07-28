@@ -422,3 +422,75 @@ def test_speed_test_json_never_carries_a_public_ip(monkeypatch):
     payload = json.loads(run(call("edgedefense_speed_test", {"response_format": "json"})))
     assert payload["download_mbps"] == 100.0
     assert "ip" not in {key.lower() for key in payload}
+
+
+# --------------------------------------------------------------------------
+# Server metadata
+# --------------------------------------------------------------------------
+
+
+def _init_options():
+    return srv.mcp._mcp_server.create_initialization_options()
+
+
+def test_server_advertises_its_own_version_not_the_sdks():
+    """FastMCP falls back to the MCP SDK's version when none is set.
+
+    That default is worse than useless: it moves when a dependency is upgraded
+    and stays still when this code changes, so it cannot identify a build.
+    """
+    import mcp as mcp_sdk
+    from importlib.metadata import version as pkg_version
+
+    advertised = _init_options().server_version
+    assert advertised == srv.__version__
+
+    try:
+        sdk = pkg_version("mcp")
+    except Exception:  # pragma: no cover - SDK always installed in CI
+        sdk = None
+    if sdk:
+        assert advertised != sdk, "still reporting the SDK version as our own"
+
+
+def test_server_advertises_homepage_and_icons():
+    """Directories score a server on this metadata; absent fields score zero."""
+    options = _init_options()
+
+    assert options.website_url == srv.HOMEPAGE
+    assert options.website_url.startswith("https://")
+
+    assert options.icons, "no icons advertised"
+    for icon in options.icons:
+        assert icon.src.startswith("https://"), icon.src
+        assert icon.mimeType
+
+
+def test_icon_urls_point_at_files_the_site_actually_serves():
+    """A mistyped icon path 404s silently -- the client just shows no icon.
+
+    This checks the filenames against the site's public/ directory rather than
+    over the network, so it stays fast and works offline. It caught `icon.svg`,
+    which was never a file that existed.
+    """
+    import pathlib
+
+    site_public = pathlib.Path(
+        r"C:\Users\Arun Dass\Desktop\edge ai site\public"
+    )
+    if not site_public.is_dir():
+        pytest.skip("site checkout not present next to this repo")
+
+    for icon in _init_options().icons:
+        filename = icon.src.rsplit("/", 1)[-1]
+        assert (site_public / filename).is_file(), (
+            f"{filename} is advertised as an icon but is not in the site's "
+            f"public/ directory, so the URL will 404"
+        )
+
+
+def test_instructions_describe_the_server():
+    """The description a directory shows comes from `instructions`."""
+    instructions = _init_options().instructions or ""
+    assert len(instructions) > 200
+    assert "network" in instructions.lower()
