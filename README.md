@@ -43,12 +43,6 @@ It is also **read-only by design**. There is deliberately no "block this device"
 | `edgedefense_get_trust_score` | A single 0–100 score for your network, with the reasons behind it |
 | `edgedefense_explain_finding` | Turns any flagged issue into a plain-English explanation of what it means and what to do |
 
-Two more are available but switched off until you explicitly turn them on, because they need administrator access:
-
-| Tool | What you get |
-|---|---|
-| `edgedefense_tier1_status` | Tells you whether deeper traffic analysis can run on this machine |
-| `edgedefense_analyze_traffic` | Watches traffic for a set number of seconds and flags odd behaviour — shows you exactly what it will do and waits for you to agree first |
 
 ## Install
 
@@ -369,10 +363,9 @@ package. This is a standing architectural constraint, not a future TODO.
    `core-engine/scripts/update_oui.py`, a maintainer-run script that is not part
    of the distributed package and is documented as such in its own docstring.
 
-2. **Tier 0 needs no elevated privileges.** Device discovery, identification,
+2. **Needs no elevated privileges.** Device discovery, identification,
    port fingerprinting and the trust score all run as an ordinary user on
-   Windows, macOS and Linux. Only the opt-in Tier 1 traffic analysis needs more,
-   and it presents a written consent notice before requesting anything.
+   Windows, macOS and Linux.
 
 Both are load-bearing for the product's premise. A privacy tool that quietly
 calls an external API loses the argument permanently the first time a technical
@@ -380,8 +373,7 @@ user runs a packet capture on it.
 
 ### Current scope
 
-**In:** Tier 0 zero-permission discovery, Tier 1 opt-in heuristic traffic
-analysis.
+**In:** Zero-permission discovery and identification.
 
 **Out, by decision rather than by omission:** the ML pipeline (Tier 2),
 destructive tools such as `block_device`, and Core/Home product features. A free

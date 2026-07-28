@@ -22,16 +22,15 @@ service, for any purpose. Vendor lookups read a bundled CSV
 load-bearing for the product's premise, not an implementation detail — do not
 add a remote fallback anywhere in this package.
 
-**Tier 0 needs no elevated privileges.** `scan`, `discovery`, `classify`,
+**Needs no elevated privileges.** `scan`, `discovery`, `classify`,
 `findings` and `scoring` all run as an ordinary user on Windows, macOS and
-Linux. Only the opt-in `tier1` subpackage needs more, and it asks first.
+Linux.
 
 ## What is deliberately not here
 
 The trained ML detection pipeline behind the paid product is **not** part of
 this package and must never be imported into it. `mcp-server/` is public, and
-anything reachable from it is public by extension. `tier1/heuristics.py`
-contains two transparent statistical rules and nothing more.
+anything reachable from it is public by extension.
 
 This boundary is a hard architectural constraint, not a future TODO.
 
@@ -53,10 +52,6 @@ src/edgedefense_core/
 │   ├── arp.py          ARP table reading + UDP sweep to populate it
 │   ├── mdns.py         Dependency-free mDNS client and DNS parser
 │   └── ports.py        TCP connect fingerprinting
-└── tier1/
-    ├── consent.py      Capability detection and the opt-in gate
-    ├── capture.py      Passive capture (scapy, optional)
-    └── heuristics.py   DNS-bypass and volume-outlier detection
 ```
 
 ## Usage
@@ -115,8 +110,8 @@ pip install -e ".[dev]"
 pytest
 ```
 
-The suite covers parsing, classification, scoring calibration and the Tier 1
-heuristics against synthetic fixtures — no live network required.
+The suite covers parsing, classification, and scoring calibration
+against synthetic fixtures — no live network required.
 
 ## Licence
 

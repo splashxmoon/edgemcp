@@ -14,8 +14,11 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Iterable, List, Optional
 
+from edgedefense_core.changes import ChangeReport, compare_scans
 from edgedefense_core.classify import friendly_type, summarise_types, type_count_label
+from edgedefense_core.discovery.ports import describe_port
 from edgedefense_core.findings import name_with_ip
+from edgedefense_core.local_checks import LocalSecurityReport
 from edgedefense_core.models import Device, Finding, ScanResult, TrustScore
 from edgedefense_core.util import plural
 
@@ -190,6 +193,8 @@ def format_device_detail(
 
     if device.hostname:
         lines.append(f"**Name it reports:** {device.hostname}")
+    if device.user_label:
+        lines.append(f"**Your name for it:** {device.user_label}")
     if device.is_gateway:
         lines.append("**Role:** this is your router - the device connecting you to the internet.")
     if device.is_self:
@@ -264,11 +269,7 @@ def format_trust_score(score: TrustScore, result: ScanResult) -> str:
             lines.append(f"- {label}: -{points}")
         lines.append("")
 
-    basis = (
-        "Based on device discovery and traffic analysis."
-        if score.tier1_included
-        else "Based on device discovery only. Traffic analysis (Tier 1) was not run."
-    )
+    basis = "Based on device discovery and port checks."
     lines.append(f"_{basis}_")
     lines.append("")
     lines.append(
@@ -291,8 +292,6 @@ def format_finding_explanation(finding: Finding, device: Optional[Device]) -> st
     lines.append(f"**Severity:** {finding.severity.upper()}. {severity_sentence}")
     if device:
         lines.append(f"**Device:** {name_with_ip(device)}")
-    if finding.tier == 1:
-        lines.append("**Source:** Tier 1 traffic analysis.")
     lines.append("")
 
     lines.append("## What this means")
@@ -314,55 +313,57 @@ def format_finding_explanation(finding: Finding, device: Optional[Device]) -> st
     return "\n".join(lines)
 
 
-def format_capture_result(
-    summary: Dict[str, Any],
-    findings: List[Finding],
-    score: Optional[TrustScore] = None,
-) -> str:
-    """Render the outcome of a Tier 1 capture."""
-    lines: List[str] = ["# Traffic analysis complete", ""]
+def format_changes(report: ChangeReport) -> str:
+    """Render what changed between the two most recent scans."""
+    lines: List[str] = ["# What changed on your network", ""]
     lines.append(
-        f"Listened for {summary['duration_seconds']:.0f} seconds and saw "
-        f"{summary['packets_seen']:,} packets across "
-        f"{plural(summary['devices_with_traffic'], 'device')}."
+        f"Comparing the scan at **{report.current_finished_at}** "
+        f"with the one before it (**{report.previous_finished_at}**)."
     )
     lines.append("")
 
-    if findings:
-        lines.append(f"## Anomalies detected ({len(findings)})")
-        lines.append("")
-        for finding in findings:
-            mark = _SEVERITY_MARK.get(finding.severity, finding.severity.upper())
-            lines.append(f"- {mark} {finding.summary}")
-            lines.append(f"  _Ask about `{finding.finding_id}` for the full explanation._")
-        lines.append("")
+    if not report.has_changes:
         lines.append(
-            "_These heuristics have known false-positive modes - each explanation "
-            "states them. Treat them as prompts to look, not as verdicts._"
+            "Nothing changed. Same devices, same open ports. "
+            "Run another scan later to catch new arrivals."
+        )
+        return "\n".join(lines)
+
+    if report.new_devices:
+        lines.append(f"## New devices ({len(report.new_devices)})")
+        lines.append("")
+        for device in report.new_devices:
+            lines.append(device_line(device))
+        lines.append("")
+
+    if report.vanished_devices:
+        lines.append(f"## No longer seen ({len(report.vanished_devices)})")
+        lines.append("")
+        for device in report.vanished_devices:
+            lines.append(device_line(device))
+        lines.append(
+            "_Devices that were asleep or off-network may show up here. "
+            "They often reappear on the next scan._"
         )
         lines.append("")
-    else:
-        lines.append("## Anomalies detected")
-        lines.append("")
-        lines.append(
-            "None. No device connected to addresses it never looked up, and no device "
-            "moved unusual amounts of data during the window."
-        )
-        lines.append("")
 
-    busiest = summary.get("busiest_devices") or []
-    if busiest:
-        lines.append("## Busiest devices")
+    if report.port_changes:
+        lines.append(f"## Port changes ({len(report.port_changes)})")
         lines.append("")
-        for entry in busiest:
-            lines.append(f"- **{entry['label']}** ({entry['ip']}) - {entry['total']}")
-        lines.append("")
+        for change in report.port_changes:
+            lines.append(f"**{change.label}** ({change.ip})")
+            if change.opened:
+                opened = ", ".join(
+                    f"{p} ({describe_port(p)})" for p in change.opened
+                )
+                lines.append(f"- Opened: {opened}")
+            if change.closed:
+                closed = ", ".join(
+                    f"{p} ({describe_port(p)})" for p in change.closed
+                )
+                lines.append(f"- Closed: {closed}")
+            lines.append("")
 
-    if score:
-        lines.append(f"**Updated trust score: {score.score}/100 ({score.grade})**")
-        lines.append("")
-
-    lines.append("_No packet contents were stored. Nothing left this machine._")
     return "\n".join(lines)
 
 
@@ -375,3 +376,48 @@ def _warning_block(warnings: Iterable[str]) -> List[str]:
     lines.extend(f"- {warning}" for warning in warnings)
     lines.append("")
     return lines
+
+
+def format_local_security(report: LocalSecurityReport) -> str:
+    """Format the local security checks report."""
+    lines: List[str] = ["# Local Security Configuration", ""]
+    
+    # Wi-Fi Status
+    lines.append("## Wi-Fi Security")
+    lines.append("")
+    if report.wifi_secure is None:
+        lines.append("Could not determine Wi-Fi security status.")
+    else:
+        status = "**Secure**" if report.wifi_secure else "**INSECURE** (Open Network)"
+        lines.append(f"Status: {status}")
+        if report.wifi_ssid:
+            lines.append(f"Network: {report.wifi_ssid}")
+        if report.wifi_auth_type:
+            lines.append(f"Authentication: {report.wifi_auth_type}")
+    lines.append("")
+
+    # DNS Configuration
+    lines.append("## DNS Configuration")
+    lines.append("")
+    if not report.dns_servers:
+        lines.append("No DNS servers could be detected.")
+    else:
+        lines.append(f"Using {len(report.dns_servers)} DNS server(s):")
+        for dns in report.dns_servers:
+            lines.append(f"- {dns}")
+    lines.append("")
+
+    # Local Port Exposure
+    lines.append("## Local Network Exposure")
+    lines.append("")
+    lines.append("Ports listening on `0.0.0.0` (accessible to anyone on your network):")
+    lines.append("")
+    if not report.listening_ports:
+        lines.append("No exposed ports detected. Good!")
+    else:
+        for p in report.listening_ports:
+            lines.append(f"- **Port {p['port']}** ({p['protocol'].upper()})")
+    lines.append("")
+
+    lines.extend(_warning_block(report.warnings))
+    return "\n".join(lines)

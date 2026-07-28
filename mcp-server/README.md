@@ -181,21 +181,6 @@ on your local network. Roughly the traffic of loading one web page.
 | **Trust score** | A 0–100 number with the reasons behind it |
 | **Plain-English explanations** | What any finding means, why it matters, and what it *cannot* tell you |
 
-### Tier 1 — opt-in, requires admin/root
-
-Off by default. The tool shows you exactly what elevated access is used for and
-waits for you to agree before requesting anything.
-
-- **DNS-bypass detection** — devices connecting to addresses that were never
-  looked up through your network's DNS.
-- **Volume outliers** — devices moving far more data than their peers.
-
-Only packet *headers* and counters are kept. No contents are stored, nothing is
-decrypted, and captures are one-off and time-bounded — never continuous.
-
-```bash
-pip install scapy
-```
 
 ---
 
@@ -208,8 +193,7 @@ pip install scapy
 | `edgedefense_get_device_detail` | Everything known about one device |
 | `edgedefense_get_trust_score` | The 0–100 score, with reasons |
 | `edgedefense_explain_finding` | Turn a flagged issue into a plain-English explanation |
-| `edgedefense_tier1_status` | Whether traffic analysis can run here |
-| `edgedefense_analyze_traffic` | Run traffic analysis (opt-in, elevated) |
+
 
 Every tool is read-only. All support `response_format: "json"` if you want
 structured data instead of prose.
@@ -223,8 +207,7 @@ Enforcement belongs in a product you have decided to trust.
 ## About the trust score
 
 The score starts at 100 and subtracts capped deductions for exposed risky
-services, unidentified devices, unusually broad attack surface, and (with Tier 1)
-traffic anomalies.
+services, unidentified devices, and unusually broad attack surface.
 
 **It is calibrated so a normal home network scores in the 90s** — because a
 normal home network with a router, some phones and a TV genuinely is fine. A
@@ -252,8 +235,7 @@ explanation says so rather than implying otherwise.
 - **Only common ports are checked** — 12 on a quick scan, 42 on a full one. A
   service on an unusual port will be missed.
 - **A VPN can hide your local network** from the scan entirely.
-- **Tier 1 heuristics have real false-positive modes.** DNS-over-HTTPS looks
-  exactly like DNS bypass. Each finding says so.
+
 
 ---
 

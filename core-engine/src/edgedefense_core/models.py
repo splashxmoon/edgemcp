@@ -109,6 +109,10 @@ class Device:
     open_ports: List[int] = field(default_factory=list)
     services: Dict[int, str] = field(default_factory=dict)
     mdns_services: List[str] = field(default_factory=list)
+    ssdp_services: List[str] = field(default_factory=list)
+    netbios_name: Optional[str] = None
+    http_title: Optional[str] = None
+    tls_cn: Optional[str] = None
     randomised_mac: bool = False
     is_gateway: bool = False
     is_self: bool = False
@@ -116,9 +120,13 @@ class Device:
     sources: List[str] = field(default_factory=list)
     first_seen: Optional[str] = None
     last_seen: Optional[str] = None
+    #: A name the user assigned locally; takes priority over auto-detected names.
+    user_label: Optional[str] = None
 
     def label(self) -> str:
         """Best human-facing name for this device."""
+        if self.user_label:
+            return self.user_label
         if self.hostname:
             return self.hostname
         if self.vendor:
@@ -149,7 +157,6 @@ class Finding:
     #: Longer plain-English explanation, surfaced by ``explain_finding``.
     detail: str
     what_to_do: str
-    tier: int = 0
     device_id: Optional[str] = None
     #: Honest statement of what this detection can and cannot know.
     limitations: str = ""
@@ -169,7 +176,6 @@ class TrustScore:
     reasons: List[str] = field(default_factory=list)
     #: Per-category point deductions, for transparency.
     deductions: Dict[str, int] = field(default_factory=dict)
-    tier1_included: bool = False
     device_count: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
@@ -188,7 +194,6 @@ class ScanResult:
     findings: List[Finding] = field(default_factory=list)
     #: Non-fatal problems, e.g. "mDNS socket unavailable".
     warnings: List[str] = field(default_factory=list)
-    tier1_included: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -196,7 +201,6 @@ class ScanResult:
             "finished_at": self.finished_at,
             "scan_depth": self.scan_depth,
             "subnet": self.subnet,
-            "tier1_included": self.tier1_included,
             "devices": [d.to_dict() for d in self.devices],
             "findings": [f.to_dict() for f in self.findings],
             "warnings": list(self.warnings),

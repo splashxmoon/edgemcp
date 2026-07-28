@@ -5,8 +5,8 @@ Answers questions about the local network in plain language. Everything runs on
 the machine that hosts the server: there is no account, no cloud component, and
 no outbound request of any kind, including analytics.
 
-All Tier 0 tools work without elevated privileges. The single Tier 1 tool asks
-for explicit consent, in writing, before it requests anything more.
+All tools work without elevated privileges. Device naming is the only tool
+that writes locally — everything else is read-only.
 
 Tool parameters are declared flat (rather than wrapped in a single Pydantic
 model) so the generated JSON schema has no nesting for callers to get wrong.
@@ -24,19 +24,21 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from edgedefense_core import __version__ as core_version
+from edgedefense_core.changes import compare_scans
+from edgedefense_core.classify import classify_device
 from edgedefense_core.findings import find_by_id, sort_findings
 from edgedefense_core.models import Device, Finding, ScanResult
 from edgedefense_core.scan import run_scan, scan_result_from_dict
 from edgedefense_core.scoring import compute_trust_score
 from edgedefense_core.storage import Storage
-from edgedefense_core.tier1 import consent as tier1_consent
 from edgedefense_core.vendor import oui_database_size
 
 from .formatting import (
-    format_capture_result,
+    format_changes,
     format_device_detail,
     format_device_list,
     format_finding_explanation,
+    format_local_security,
     format_scan_summary,
     format_trust_score,
     to_json,
@@ -83,10 +85,10 @@ mcp = FastMCP(
         "device is, what looks unusual, and what any finding actually means.\n\n"
         "Start with edgedefense_scan_network - the other tools read the results of the "
         "most recent scan. Findings are referenced by a stable finding_id; pass that to "
-        "edgedefense_explain_finding for a plain-English explanation.\n\n"
+        "edgedefense_explain_finding for a plain-English explanation. Use "
+        "edgedefense_whats_changed to compare the latest scan with the previous one.\n\n"
         "This server runs entirely locally. It makes no outbound network requests, "
-        "collects no telemetry, and requires no account. Tier 0 needs no elevated "
-        "privileges; Tier 1 traffic analysis is opt-in and asks for consent first."
+        "collects no telemetry, and requires no account. No elevated privileges needed."
     ),
 )
 
@@ -125,8 +127,6 @@ class DeviceFilter(str, Enum):
 _storage: Optional[Storage] = None
 #: The most recent scan, kept in memory so follow-up questions are instant.
 _last_result: Optional[ScanResult] = None
-#: Tier 1 findings from the most recent capture, merged into score and lookups.
-_tier1_findings: List[Finding] = []
 #: Serialises scans; two concurrent sweeps would interfere with each other.
 _scan_lock = asyncio.Lock()
 
@@ -144,9 +144,21 @@ def get_storage() -> Storage:
     return _storage
 
 
-def _all_findings(result: ScanResult) -> List[Finding]:
-    """Tier 0 findings plus any Tier 1 findings from the latest capture."""
-    return sort_findings(list(result.findings) + list(_tier1_findings))
+def _apply_user_label(device: Device, label: str) -> Device:
+    """Re-classify a device after the user assigns a name."""
+    device_type, confidence = classify_device(
+        hostname=device.hostname,
+        user_label=label,
+        vendor=device.vendor,
+        open_ports=device.open_ports,
+        mdns_services=device.mdns_services,
+        is_gateway=device.is_gateway,
+        is_self=device.is_self,
+    )
+    device.user_label = label
+    device.device_type = device_type
+    device.type_confidence = confidence
+    return device
 
 
 def _current_result() -> Optional[ScanResult]:
@@ -248,7 +260,6 @@ async def edgedefense_scan_network(
             "finished_at": str,
             "scan_depth": str,          # "quick" | "full"
             "subnet": str | null,       # e.g. "192.168.1.0/24"
-            "tier1_included": bool,
             "devices": [
                 {
                     "device_id": str,       # MAC, or "ip-<address>" if no MAC
@@ -301,16 +312,13 @@ async def edgedefense_scan_network(
         (VPN active, mDNS port unavailable), the scan still returns whatever was
         found and explains the gap under "Notes" / "warnings".
     """
-    global _last_result, _tier1_findings
+    global _last_result
 
     async with _scan_lock:
         result = await run_scan(scan_depth=scan_depth.value, storage=get_storage())
         _last_result = result
-        # Traffic findings describe a window that has passed; a fresh scan
-        # invalidates them rather than silently carrying them forward.
-        _tier1_findings = []
 
-    score = compute_trust_score(result.devices, result.findings, tier1_included=False)
+    score = compute_trust_score(result.devices, result.findings)
 
     if response_format == ResponseFormat.JSON:
         payload = result.to_dict()
@@ -375,7 +383,7 @@ async def edgedefense_list_devices(
     if result is None:
         return _NO_SCAN_MESSAGE
 
-    findings = _all_findings(result)
+    findings = result.findings
     flagged_ids = {f.device_id for f in findings if f.device_id and f.severity != "info"}
 
     if filter_type == DeviceFilter.UNKNOWN:
@@ -468,7 +476,7 @@ async def edgedefense_get_device_detail(
             "edgedefense_scan_network again to pick it up."
         )
 
-    device_findings = [f for f in _all_findings(result) if f.device_id == device.device_id]
+    device_findings = [f for f in result.findings if f.device_id == device.device_id]
 
     if response_format == ResponseFormat.JSON:
         return to_json(
@@ -518,7 +526,6 @@ async def edgedefense_get_trust_score(
             "grade": str,               # "Strong"|"Good"|"Fair"|"Needs attention"|"At risk"
             "reasons": [str],
             "deductions": {str: int},   # category label -> points subtracted
-            "tier1_included": bool,
             "device_count": int
         }
 
@@ -537,9 +544,9 @@ async def edgedefense_get_trust_score(
     if result is None:
         return _NO_SCAN_MESSAGE
 
-    findings = _all_findings(result)
+    findings = result.findings
     score = compute_trust_score(
-        result.devices, findings, tier1_included=bool(_tier1_findings)
+        result.devices, findings
     )
 
     if response_format == ResponseFormat.JSON:
@@ -606,7 +613,7 @@ async def edgedefense_explain_finding(
     if result is None:
         return _NO_SCAN_MESSAGE
 
-    findings = _all_findings(result)
+    findings = result.findings
     finding = find_by_id(findings, finding_id)
 
     if finding is None:
@@ -636,256 +643,167 @@ async def edgedefense_explain_finding(
 
 
 @mcp.tool(
-    name="edgedefense_tier1_status",
+    name="edgedefense_local_security",
     annotations={
-        "title": "Check traffic-analysis availability",
+        "title": "Check local machine security",
         "readOnlyHint": True,
         "destructiveHint": False,
         "idempotentHint": True,
         "openWorldHint": False,
     },
 )
-async def edgedefense_tier1_status(
+async def edgedefense_local_security(
     response_format: FormatParam = ResponseFormat.MARKDOWN,
 ) -> str:
-    """Report whether opt-in traffic analysis (Tier 1) can run on this machine.
+    """Run security and configuration checks on the computer running the scan.
 
-    Checks three things independently: whether the user has consented, whether
-    the optional capture dependency is installed, and whether the process has
-    the privileges raw packet capture requires. Reports what is missing and how
-    to fix it. Reading this status never requests any permission.
+    Checks Wi-Fi encryption (warns if connected to an open network), DNS configuration,
+    and lists local ports that are exposed to the network (listening on 0.0.0.0).
 
     Args:
         response_format (ResponseFormat): 'markdown' or 'json'. Default 'markdown'.
 
     Returns:
-        str: In markdown mode, a readable status with next steps.
+        str: In markdown mode, a formatted report of the local security posture.
 
         In json mode:
         {
-            "consent_granted": bool,
-            "consent_granted_at": str | null,
-            "has_privileges": bool,
-            "has_capture_backend": bool,
-            "backend_hint": str,        # actionable guidance
-            "platform": str,
-            "ready": bool,
-            "blocking_reason": str | null  # "consent_required"|"backend_missing"|
-                                           # "privileges_missing"|null
+            "wifi_secure": bool | null,
+            "wifi_ssid": str | null,
+            "wifi_auth_type": str | null,
+            "dns_servers": [ ... ],
+            "listening_ports": [ {"protocol": str, "port": int, "address": str} ],
+            "warnings": [ ... ]
         }
-
-    Examples:
-        - Use when: "Can you analyse my traffic?" -> defaults
-        - Use when: "Why isn't traffic analysis working?" -> defaults
-        - Don't use when: the user wants to actually run it - use
-          edgedefense_analyze_traffic
-
-    Error Handling:
-        Never fails. Missing capabilities are reported as status, not errors.
     """
-    capability = tier1_consent.get_capability(get_storage())
+    from edgedefense_core.local_checks import run_local_checks
+    report = await run_local_checks()
 
     if response_format == ResponseFormat.JSON:
-        return to_json(capability.to_dict())
+        return to_json(report.to_dict())
 
-    def check(ok: bool) -> str:
-        return "yes" if ok else "no"
-
-    lines = ["# Traffic analysis (Tier 1) status", ""]
-    lines.append(f"- **User has opted in:** {check(capability.consent_granted)}")
-    lines.append(f"- **Capture backend installed:** {check(capability.has_capture_backend)}")
-    lines.append(f"- **Process has required privileges:** {check(capability.has_privileges)}")
-    lines.append("")
-
-    if capability.ready:
-        lines.append("Traffic analysis is ready to run.")
-    elif capability.blocking_reason() == "consent_required":
-        lines.append(
-            "**Not enabled.** Traffic analysis is off by default and requires explicit "
-            "consent. Calling `edgedefense_analyze_traffic` will show exactly what "
-            "elevated access is used for, so the user can decide."
-        )
-    else:
-        lines.append(f"**Not available.** {capability.backend_hint}")
-
-    lines.append("")
-    lines.append(
-        "_Everything in Tier 0 - device discovery, identification, port checks, the trust "
-        "score - works without any of this._"
-    )
-    return "\n".join(lines)
+    return format_local_security(report)
 
 
 @mcp.tool(
-    name="edgedefense_analyze_traffic",
+    name="edgedefense_whats_changed",
     annotations={
-        "title": "Analyse network traffic (opt-in, elevated)",
+        "title": "What changed on the network",
         "readOnlyHint": True,
         "destructiveHint": False,
-        "idempotentHint": False,
+        "idempotentHint": True,
         "openWorldHint": False,
     },
 )
-async def edgedefense_analyze_traffic(
-    consent_confirmed: Annotated[
-        bool,
-        Field(
-            description=(
-                "Must be true to run a capture. Leave false (the default) on the first "
-                "call: the tool then returns the full consent notice explaining what "
-                "elevated access is used for, which MUST be shown to the user so they can "
-                "decide. Only set true after the user has seen that notice and explicitly "
-                "agreed. Never set it on their behalf"
-            )
-        ),
-    ] = False,
-    duration_seconds: Annotated[
-        int,
-        Field(
-            description="How long to capture for, 10-300 seconds. Stops on its own",
-            ge=10,
-            le=300,
-        ),
-    ] = 60,
-    interface: Annotated[
-        Optional[str],
-        Field(
-            description="Optional network interface name. Auto-detected when omitted",
-            max_length=100,
-        ),
-    ] = None,
+async def edgedefense_whats_changed(
     response_format: FormatParam = ResponseFormat.MARKDOWN,
 ) -> str:
-    """Passively observe network traffic for a fixed window and flag anomalies.
+    """Compare the most recent scan with the one before it to find changes.
 
-    OPT-IN AND ELEVATED. This is the only tool that needs administrator/root
-    privileges. Call it first with consent_confirmed=false (the default): it
-    returns the full consent notice, which MUST be shown to the user verbatim.
-    Only call again with consent_confirmed=true after the user has read that
-    notice and explicitly agreed. Do not set that flag on the user's behalf.
-
-    Detects two things: devices connecting to internet addresses that were never
-    resolved through the network's DNS, and devices moving far more data than
-    their peers. Both heuristics have well-understood false-positive modes,
-    which each finding states.
-
-    Only packet headers and counters are retained. No packet contents are
-    stored, nothing is decrypted, and nothing is transmitted anywhere.
+    Reports new devices that appeared, devices that vanished, and any ports that
+    opened or closed on devices that were present in both scans.
 
     Args:
-        consent_confirmed (bool): must be true to capture; false returns the
-            consent notice. Default false.
-        duration_seconds (int): 10-300. Default 60.
-        interface (Optional[str]): interface name, auto-detected if omitted.
         response_format (ResponseFormat): 'markdown' or 'json'. Default 'markdown'.
 
     Returns:
-        str: With consent_confirmed=false, the consent notice plus current
-        capability status.
-
-        With consent granted, in markdown mode: capture statistics, any
-        anomalies found with their finding ids, the busiest devices, and the
-        updated trust score.
+        str: In markdown mode, a formatted summary of all changes.
 
         In json mode:
         {
-            "consent_required": bool,       # true only if consent is still needed
-            "capture": {
-                "duration_seconds": float,
-                "packets_seen": int,
-                "devices_with_traffic": int,
-                "names_resolved": int,
-                "busiest_devices": [ {"ip": str, "label": str, "total": str,
-                                      "total_bytes": int} ]
-            },
-            "findings": [ ... ],            # same finding schema, with tier=1
-            "trust_score": { ... }
+            "current_finished_at": str,
+            "previous_finished_at": str,
+            "new_devices": [ ... ],
+            "vanished_devices": [ ... ],
+            "port_changes": [ ... ],
+            "has_changes": bool
         }
 
     Examples:
-        - Use when: "Is anything on my network behaving oddly?" -> start with
-          consent_confirmed=false, show the notice, then re-call if they agree
-        - Use when: the user has already opted in and asks to re-check traffic
-        - Don't use when: the user only wants to know what is connected - Tier 0
-          answers that with no special permissions
-
-    Error Handling:
-        Returns a clear message rather than raising when: no scan has been run,
-        the capture dependency is missing, or privileges are insufficient. Each
-        case explains the specific next step.
+        - Use when: "What changed since yesterday?"
+        - Use when: "Anything new on my network?"
     """
-    global _tier1_findings
-
     storage = get_storage()
-    capability = tier1_consent.get_capability(storage)
+    current_payload = storage.load_latest_scan()
+    previous_payload = storage.load_previous_scan()
 
-    # --- Consent gate --------------------------------------------------
-    if not consent_confirmed:
-        if response_format == ResponseFormat.JSON:
-            return to_json(
-                {
-                    "consent_required": True,
-                    "consent_text": tier1_consent.CONSENT_TEXT,
-                    "capability": capability.to_dict(),
-                }
-            )
+    if not current_payload:
+        return _NO_SCAN_MESSAGE
+
+    if not previous_payload:
         return (
-            "# Traffic analysis requires your explicit consent\n\n"
-            f"{tier1_consent.CONSENT_TEXT}\n\n"
-            "---\n\n"
-            f"**Current status on this machine:** {capability.backend_hint}\n\n"
-            "If you want to proceed, say so and this tool will be called again with your "
-            "consent recorded. If you would rather not, everything else keeps working "
-            "exactly as it does now."
+            "Only one scan has been run so far. Run another scan later to see what "
+            "has changed."
         )
 
-    # --- Capability checks ---------------------------------------------
-    if not capability.has_capture_backend or not capability.has_privileges:
-        return (
-            "# Traffic analysis cannot start\n\n"
-            f"{capability.backend_hint}\n\n"
-            "Your consent has not been recorded, because there is nothing to consent to "
-            "until this is resolved. Tier 0 features are unaffected."
-        )
+    current = scan_result_from_dict(current_payload)
+    previous = scan_result_from_dict(previous_payload)
+    
+    report = compare_scans(current, previous)
+
+    if response_format == ResponseFormat.JSON:
+        return to_json(report.to_dict())
+
+    return format_changes(report)
+
+
+@mcp.tool(
+    name="edgedefense_name_device",
+    annotations={
+        "title": "Name a device",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def edgedefense_name_device(
+    device_id: Annotated[
+        str,
+        Field(
+            description=(
+                "Which device to name. Accepts the device_id from a previous response, "
+                "or a plain IP or MAC address."
+            ),
+        ),
+    ],
+    label: Annotated[
+        str,
+        Field(
+            description="The friendly name to assign to the device (e.g. 'SimpliSafe base station').",
+        ),
+    ],
+) -> str:
+    """Assign a persistent friendly name to a device.
+
+    This name will be saved locally and applied to the device in all future scans.
+    It helps turn unidentified devices into a network you understand. This is a
+    write operation.
+
+    Args:
+        device_id (str): The device identifier (device_id, IP, MAC).
+        label (str): The name to assign.
+
+    Returns:
+        str: Confirmation message.
+    """
+    global _last_result
 
     result = _current_result()
     if result is None:
-        return (
-            "Run edgedefense_scan_network first. Traffic analysis attributes activity to "
-            "specific devices, which needs the device list from a scan."
-        )
+        return _NO_SCAN_MESSAGE
 
-    # Consent is recorded only now: the user agreed AND the capture can happen.
-    if not capability.consent_granted:
-        tier1_consent.grant_consent(storage)
+    device = _resolve_device(result, device_id)
+    if device is None:
+        return f"No device matching '{device_id}' was found in the most recent scan."
 
-    from edgedefense_core.tier1.capture import CaptureUnavailable, capture_traffic
-    from edgedefense_core.tier1.heuristics import analyse_capture, capture_summary
+    storage = get_storage()
+    storage.set_user_label(device.device_id, label)
+    
+    # Update in memory
+    _apply_user_label(device, label)
 
-    try:
-        capture = await capture_traffic(
-            duration_seconds=duration_seconds, interface=interface
-        )
-    except CaptureUnavailable as exc:
-        return f"# Traffic analysis could not run\n\n{exc}"
-
-    findings = analyse_capture(capture, result.devices)
-    _tier1_findings = findings
-
-    summary = capture_summary(capture, result.devices)
-    score = compute_trust_score(result.devices, _all_findings(result), tier1_included=True)
-
-    if response_format == ResponseFormat.JSON:
-        return to_json(
-            {
-                "consent_required": False,
-                "capture": summary,
-                "findings": [f.to_dict() for f in findings],
-                "trust_score": score.to_dict(),
-            }
-        )
-
-    return format_capture_result(summary, findings, score)
+    return f"Device {device.ip} ({device.mac or 'no MAC'}) has been named '{label}'."
 
 
 # --------------------------------------------------------------------------

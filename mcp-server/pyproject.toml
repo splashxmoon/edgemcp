@@ -28,8 +28,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Adds Tier 1 passive traffic capture. Never needed for the default experience.
-tier1 = ["edgedefense-core[tier1]>=0.1.0"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
 [project.scripts]

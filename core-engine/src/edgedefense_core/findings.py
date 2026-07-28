@@ -71,6 +71,8 @@ def bare_name(device: Device) -> str:
     1.2.3.4". The forms here are lowercase and article-led so they also read
     correctly mid-sentence ("Check the Sonos device's settings page").
     """
+    if device.user_label:
+        return device.user_label
     if device.hostname:
         return device.hostname
     if device.vendor:
@@ -86,7 +88,7 @@ def sentence_name(device: Device) -> str:
     article-led fallbacks are capitalised.
     """
     name = bare_name(device)
-    if device.hostname:
+    if device.hostname or device.user_label:
         return name
     return name[0].upper() + name[1:]
 
@@ -531,52 +533,6 @@ _EXPLANATIONS: Dict[str, Dict[str, str]] = {
             "penalise every modern phone."
         ),
     },
-    "dns_bypass": {
-        "detail": (
-            "{Name} at {ip} opened connections to {count} internet address(es) that were "
-            "never looked up through this network's DNS server during the capture window.\n\n"
-            "Normally a device asks DNS to translate a name like 'example.com' into an "
-            "address, then connects to it. Connecting to an address that was never resolved "
-            "means the device either had it hard-coded, used its own encrypted DNS instead "
-            "of the network's, or was given it through some other channel.\n\n"
-            "The honest reading: this is common and usually benign. Many devices ship with "
-            "hard-coded addresses, and DNS-over-HTTPS is now a default in several browsers "
-            "and operating systems. It is worth surfacing because it is also what malware "
-            "looks like when it deliberately avoids leaving DNS records."
-        ),
-        "what_to_do": (
-            "Consider whether {name} is a device that would reasonably use its own DNS - a "
-            "browser, a phone, or a smart speaker very plausibly would. If it is a simple "
-            "appliance with no reason to bypass the network's DNS, that is more interesting, "
-            "and the destination addresses are worth looking up."
-        ),
-        "limitations": (
-            "The capture only sees the window it ran for. A name resolved before the capture "
-            "started, or cached from an earlier lookup, will look like a bypass here. Devices "
-            "using DNS-over-HTTPS or DNS-over-TLS will always appear this way. Treat this as "
-            "a prompt to look, not as a verdict."
-        ),
-    },
-    "data_volume_outlier": {
-        "detail": (
-            "{Name} at {ip} transferred substantially more data than the other devices on "
-            "this network during the capture window - {bytes_human}, against a typical "
-            "device's {median_human}.\n\n"
-            "High volume by itself means very little. Streaming video, a backup, a system "
-            "update, or a large download all produce exactly this pattern. It is reported "
-            "because a device that has no reason to move much data suddenly doing so is one "
-            "of the few signals that is meaningful without deep inspection."
-        ),
-        "what_to_do": (
-            "Ask whether {name} has an obvious reason to be moving this much data right now. "
-            "A TV mid-stream or a computer mid-backup explains itself. A door sensor or a "
-            "smart plug does not."
-        ),
-        "limitations": (
-            "This is a relative comparison within a single short capture, not a baseline "
-            "built over time. It says nothing about where the data went or what it contained."
-        ),
-    },
 }
 
 
@@ -585,7 +541,7 @@ def explanation_for_code(code: str) -> Optional[Dict[str, str]]:
     return _EXPLANATIONS.get(code)
 
 
-#: Public aliases so other modules (notably the Tier 1 heuristics) can build
+#: Public aliases so other modules can build
 #: findings with identical ids and wording without reaching into privates.
 EXPLANATIONS = _EXPLANATIONS
 make_finding_id = _make_id

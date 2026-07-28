@@ -81,7 +81,6 @@ def fake_scan(tmp_path, monkeypatch):
 
     monkeypatch.setattr(srv, "_storage", Storage(data_dir=tmp_path))
     monkeypatch.setattr(srv, "_last_result", result)
-    monkeypatch.setattr(srv, "_tier1_findings", [])
     yield result
     monkeypatch.setattr(srv, "_last_result", None)
 
@@ -105,9 +104,12 @@ def run(coro):
 def test_every_tool_is_registered_read_only():
     """Nothing in the free tier may modify the network."""
     tools = run(srv.mcp.list_tools())
-    assert len(tools) == 7
+    assert len(tools) == 8
     for tool in tools:
-        assert tool.annotations.readOnlyHint is True, tool.name
+        if tool.name == "edgedefense_name_device":
+            assert tool.annotations.readOnlyHint is False, tool.name
+        else:
+            assert tool.annotations.readOnlyHint is True, tool.name
         assert tool.annotations.destructiveHint is False, tool.name
         # Everything runs locally; nothing reaches an external service.
         assert tool.annotations.openWorldHint is False, tool.name
@@ -187,12 +189,6 @@ def test_trust_score_json_is_well_formed():
     assert 0 <= score["score"] <= 100
     assert score["grade"]
     assert score["reasons"]
-    assert score["tier1_included"] is False
-
-
-def test_trust_score_markdown_states_tier1_was_not_run():
-    out = run(call("edgedefense_get_trust_score"))
-    assert "Traffic analysis (Tier 1) was not run" in out
 
 
 def test_explain_finding_covers_meaning_action_and_limits():
@@ -217,47 +213,6 @@ def test_explain_unknown_finding_lists_available_ids():
     out = run(call("edgedefense_explain_finding", {"finding_id": "nope"}))
     assert "No finding with id" in out
     assert "telnet_exposed" in out
-
-
-# --------------------------------------------------------------------------
-# Tier 1 gating
-# --------------------------------------------------------------------------
-
-
-def test_traffic_analysis_returns_consent_notice_before_doing_anything():
-    """The default call must never capture; it must explain and stop."""
-    out = run(call("edgedefense_analyze_traffic"))
-    assert "requires your explicit consent" in out
-    assert "does not send any data anywhere" in out
-    assert "does not store packet contents" in out
-
-
-def test_traffic_analysis_consent_notice_in_json_mode():
-    payload = json.loads(
-        run(call("edgedefense_analyze_traffic", {"response_format": "json"}))
-    )
-    assert payload["consent_required"] is True
-    assert payload["capability"]["consent_granted"] is False
-
-
-def test_declining_consent_leaves_no_recorded_opt_in():
-    run(call("edgedefense_analyze_traffic"))
-    status = json.loads(run(call("edgedefense_tier1_status", {"response_format": "json"})))
-    assert status["consent_granted"] is False
-
-
-def test_tier1_status_explains_what_is_missing():
-    out = run(call("edgedefense_tier1_status"))
-    assert "Tier 1" in out
-    # Tier 0 must be described as unaffected by any Tier 1 gap.
-    assert "without any of this" in out
-
-
-def test_duration_outside_bounds_is_rejected():
-    """Capture windows are bounded; this tool never sniffs indefinitely."""
-    with pytest.raises(Exception):
-        run(call("edgedefense_analyze_traffic",
-                 {"consent_confirmed": True, "duration_seconds": 99999}))
 
 
 # --------------------------------------------------------------------------

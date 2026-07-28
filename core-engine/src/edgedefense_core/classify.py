@@ -184,6 +184,7 @@ def _better(current: Tuple[str, str], candidate: Tuple[str, str]) -> Tuple[str, 
 def classify_device(
     *,
     hostname: Optional[str] = None,
+    user_label: Optional[str] = None,
     vendor: Optional[str] = None,
     open_ports: Optional[Iterable[int]] = None,
     mdns_services: Optional[Iterable[str]] = None,
@@ -214,8 +215,10 @@ def classify_device(
         if signal:
             guess = _better(guess, signal)
 
-    # 2. Hostname keywords, plus any model string from mDNS TXT records.
+    # 2. Hostname keywords, user-assigned names, plus model strings from mDNS TXT.
     searchable = (hostname or "").lower()
+    if user_label:
+        searchable += " " + user_label.lower()
     for value in (txt_hints or {}).values():
         searchable += " " + value.lower()
 

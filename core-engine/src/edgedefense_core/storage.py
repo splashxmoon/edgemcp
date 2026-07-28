@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 #: Bump when the schema changes in a way that needs migration.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 #: Keep enough history to answer "what changed?" without growing unbounded.
 _MAX_SCANS_RETAINED = 20
@@ -103,7 +103,7 @@ class Storage:
         rather than being recreated.
         """
         existing = {row["name"] for row in conn.execute("PRAGMA table_info(devices)")}
-        for column in ("mdns_services", "hostname"):
+        for column in ("mdns_services", "hostname", "user_label"):
             if column not in existing:
                 conn.execute(f"ALTER TABLE devices ADD COLUMN {column} TEXT")
 
@@ -240,6 +240,57 @@ class Storage:
             return json.loads(row["payload"])
         except json.JSONDecodeError:
             return None
+
+    def load_previous_scan(self) -> Optional[Dict[str, Any]]:
+        """Return the scan before the most recent one, for change detection."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload FROM scans ORDER BY id DESC LIMIT 1 OFFSET 1"
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            return json.loads(row["payload"])
+        except json.JSONDecodeError:
+            return None
+
+    def load_user_labels(self) -> Dict[str, str]:
+        """Return every user-assigned label keyed by device_id."""
+        labels: Dict[str, str] = {}
+        with self._connect() as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT device_id, user_label FROM devices WHERE user_label IS NOT NULL"
+                ).fetchall()
+            except sqlite3.OperationalError:
+                return labels
+        for row in rows:
+            if row["user_label"]:
+                labels[row["device_id"]] = row["user_label"]
+        return labels
+
+    def set_user_label(self, device_id: str, label: str) -> None:
+        """Persist a user-assigned name for a device."""
+        now = utc_now()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT first_seen FROM devices WHERE device_id = ?",
+                (device_id,),
+            ).fetchone()
+            first_seen = row["first_seen"] if row else now
+            conn.execute(
+                """
+                INSERT INTO devices(
+                    device_id, mac, first_seen, last_seen, last_ip, last_label,
+                    mdns_services, hostname, user_label
+                )
+                VALUES(?, NULL, ?, ?, NULL, ?, '[]', NULL, ?)
+                ON CONFLICT(device_id) DO UPDATE SET
+                    user_label = excluded.user_label,
+                    last_seen  = excluded.last_seen
+                """,
+                (device_id, first_seen, now, label, label),
+            )
 
     # -- housekeeping ------------------------------------------------------
 

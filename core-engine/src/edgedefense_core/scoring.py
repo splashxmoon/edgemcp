@@ -38,9 +38,6 @@ _WEIGHTS: Dict[str, int] = {
     # Identification
     "unidentified_device": 4,
     "private_address_device": 0,  # expected modern behaviour; never scored
-    # Tier 1
-    "dns_bypass": 7,
-    "data_volume_outlier": 3,
 }
 
 #: Which category each code rolls up into, and the maximum any one category may
@@ -58,22 +55,18 @@ _CATEGORIES: Dict[str, str] = {
     "many_open_ports": "attack_surface",
     "unidentified_device": "unidentified_devices",
     "private_address_device": "unidentified_devices",
-    "dns_bypass": "tier1_anomalies",
-    "data_volume_outlier": "tier1_anomalies",
 }
 
 _CATEGORY_CAPS: Dict[str, int] = {
     "exposed_services": 45,
     "attack_surface": 12,
     "unidentified_devices": 16,
-    "tier1_anomalies": 24,
 }
 
 _CATEGORY_LABELS: Dict[str, str] = {
     "exposed_services": "exposed services",
     "attack_surface": "unnecessary open ports",
     "unidentified_devices": "unidentified devices",
-    "tier1_anomalies": "traffic anomalies",
 }
 
 
@@ -140,11 +133,6 @@ def _reasons(
                 f"{plural(count, 'device')} {verb} on more ports than a home device "
                 f"usually needs (-{points} points)."
             )
-        else:
-            reasons.append(
-                f"Traffic analysis flagged "
-                f"{plural(len(in_category), 'anomaly', 'anomalies')} (-{points} points)."
-            )
 
         if len(reasons) >= 3:
             break
@@ -165,16 +153,12 @@ def _reasons(
 def compute_trust_score(
     devices: Iterable[Device],
     findings: Iterable[Finding],
-    tier1_included: bool = False,
 ) -> TrustScore:
     """Compute the shareable trust score from a completed scan.
 
     Args:
         devices: Every device discovered.
         findings: Findings produced by :mod:`edgedefense_core.findings`.
-        tier1_included: Whether traffic-analysis findings are part of the input.
-            Recorded on the result so the output can say what the score is
-            based on rather than implying a depth of analysis that did not run.
 
     Returns:
         A :class:`~edgedefense_core.models.TrustScore`.
@@ -209,7 +193,6 @@ def compute_trust_score(
                 "check that you are connected to wifi or ethernet rather than only a VPN.",
             ],
             deductions={},
-            tier1_included=tier1_included,
             device_count=0,
         )
 
@@ -220,7 +203,6 @@ def compute_trust_score(
         grade=_grade(score),
         reasons=_reasons(finding_list, device_list, capped_totals),
         deductions={_CATEGORY_LABELS.get(k, k): v for k, v in capped_totals.items()},
-        tier1_included=tier1_included,
         device_count=len(device_list),
     )
 

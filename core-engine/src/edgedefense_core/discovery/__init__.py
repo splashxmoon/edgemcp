@@ -7,6 +7,6 @@ any one of them returning nothing.
 
 from __future__ import annotations
 
-from . import arp, mdns, ports
+from . import arp, http_tls, mdns, netbios, ports, ssdp
 
-__all__ = ["arp", "mdns", "ports"]
+__all__ = ["arp", "http_tls", "mdns", "netbios", "ports", "ssdp"]

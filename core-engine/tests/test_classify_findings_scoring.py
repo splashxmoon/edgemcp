@@ -220,7 +220,4 @@ def test_empty_scan_reports_no_data_rather_than_a_perfect_score():
     assert score.device_count == 0
 
 
-def test_tier1_flag_is_recorded_on_the_score():
-    device = make_device()
-    assert compute_trust_score([device], [], tier1_included=True).tier1_included is True
-    assert compute_trust_score([device], [], tier1_included=False).tier1_included is False
+

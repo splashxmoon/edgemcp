@@ -13,8 +13,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .classify import classify_device
 from .discovery import arp as arp_discovery
+from .discovery import http_tls as http_tls_discovery
 from .discovery import mdns as mdns_discovery
+from .discovery import netbios as netbios_discovery
 from .discovery import ports as port_discovery
+from .discovery import ssdp as ssdp_discovery
 from .findings import build_findings
 from .models import Device, Finding, ScanResult, is_randomised_mac
 from .netinfo import LocalNetwork, describe_local_network
@@ -108,9 +111,13 @@ async def run_scan(
     mdns_task = asyncio.create_task(
         mdns_discovery.discover_via_mdns(duration=settings["mdns_seconds"])
     )
+    ssdp_task = asyncio.create_task(
+        ssdp_discovery.discover_via_ssdp(duration=settings["mdns_seconds"])
+    )
 
     arp_map: Dict[str, str] = {}
     mdns_hosts: Dict[str, mdns_discovery.MdnsHost] = {}
+    ssdp_hosts: Dict[str, ssdp_discovery.SsdpHost] = {}
 
     try:
         arp_map = await arp_task
@@ -123,9 +130,15 @@ async def run_scan(
     except Exception as exc:
         warnings.append(f"mDNS discovery failed: {type(exc).__name__}.")
 
+    try:
+        ssdp_hosts, ssdp_warnings = await ssdp_task
+        warnings.extend(ssdp_warnings)
+    except Exception as exc:
+        warnings.append(f"SSDP discovery failed: {type(exc).__name__}.")
+
     # Union of everything any method saw.
     all_ips = sorted(
-        set(arp_map) | set(mdns_hosts) | ({net.local_ip} if net.local_ip else set()),
+        set(arp_map) | set(mdns_hosts) | set(ssdp_hosts) | ({net.local_ip} if net.local_ip else set()),
         key=lambda ip: tuple(int(part) for part in ip.split(".")),
     )
 
@@ -155,35 +168,56 @@ async def run_scan(
         )
     )
     hostname_task = asyncio.create_task(_resolve_hostnames(all_ips))
+    netbios_task = asyncio.create_task(netbios_discovery.scan_netbios(all_ips, timeout=settings["port_timeout"]))
 
     try:
         open_ports_map = await port_task
     except Exception as exc:
         open_ports_map = {}
         warnings.append(f"Port fingerprinting failed: {type(exc).__name__}.")
+        
+    try:
+        http_tls_hosts = await http_tls_discovery.scan_http_tls(
+            open_ports_map, timeout=settings["port_timeout"]
+        )
+    except Exception as exc:
+        http_tls_hosts = {}
+        warnings.append(f"HTTP/TLS extraction failed: {type(exc).__name__}.")
 
     try:
         hostname_map = await hostname_task
     except Exception:
         hostname_map = {}
+        
+    try:
+        netbios_map = await netbios_task
+    except Exception:
+        netbios_map = {}
 
     # Evidence from previous scans, so a device that happens to stay quiet
     # during this mDNS window keeps the identity it already earned.
     memory: Dict[str, Dict[str, Any]] = {}
+    user_labels: Dict[str, str] = {}
     if storage is not None:
         try:
             memory = storage.load_device_memory()
+            user_labels = storage.load_user_labels()
         except Exception:
             memory = {}
+            user_labels = {}
 
     devices = _assemble_devices(
         all_ips=all_ips,
         arp_map=arp_map,
         mdns_hosts=mdns_hosts,
+        ssdp_hosts=ssdp_hosts,
         open_ports_map=open_ports_map,
         hostname_map=hostname_map,
+        netbios_map=netbios_map,
+        http_tls_hosts=http_tls_hosts,
         net=net,
         memory=memory,
+        user_labels=user_labels,
     )
 
     if storage is not None:
@@ -221,14 +255,19 @@ def _assemble_devices(
     all_ips: List[str],
     arp_map: Dict[str, str],
     mdns_hosts: Dict[str, "mdns_discovery.MdnsHost"],
+    ssdp_hosts: Dict[str, "ssdp_discovery.SsdpHost"],
     open_ports_map: Dict[str, List[int]],
     hostname_map: Dict[str, str],
+    netbios_map: Dict[str, str],
+    http_tls_hosts: Dict[str, "http_tls_discovery.HttpTlsHost"],
     net: LocalNetwork,
     memory: Optional[Dict[str, Dict[str, Any]]] = None,
+    user_labels: Optional[Dict[str, str]] = None,
 ) -> List[Device]:
     """Merge every evidence source into one Device per address."""
     devices: List[Device] = []
     memory = memory or {}
+    user_labels = user_labels or {}
     now = utc_now()
 
     for ip in all_ips:
@@ -237,18 +276,31 @@ def _assemble_devices(
         open_ports = open_ports_map.get(ip, [])
         device_id = _device_id_for(ip, mac)
         remembered = memory.get(device_id, {})
+        user_label = user_labels.get(device_id)
 
         hostname = hostname_map.get(ip)
         if mdns_entry and mdns_entry.hostname:
             hostname = mdns_entry.hostname  # mDNS names are friendlier than PTR
         if not hostname:
+            hostname = netbios_map.get(ip)
+        if not hostname:
             hostname = remembered.get("hostname")
+
+        netbios_name = netbios_map.get(ip)
+        http_tls_host = http_tls_hosts.get(ip)
+        http_title = http_tls_host.titles[0] if http_tls_host and http_tls_host.titles else None
+        tls_cn = http_tls_host.tls_cns[0] if http_tls_host and http_tls_host.tls_cns else None
 
         # Union with what this device advertised on previous scans.
         seen_services = set(mdns_entry.services) if mdns_entry else set()
         seen_services.update(remembered.get("mdns_services") or [])
         mdns_services = sorted(seen_services)
         txt_hints = dict(mdns_entry.txt_hints) if mdns_entry else {}
+        
+        ssdp_entry = ssdp_hosts.get(ip)
+        seen_ssdp = set(ssdp_entry.server_headers) | set(ssdp_entry.st_headers) if ssdp_entry else set()
+        seen_ssdp.update(remembered.get("ssdp_services") or [])
+        ssdp_services = sorted(seen_ssdp)
 
         is_self = bool(net.local_ip and ip == net.local_ip)
         is_gateway = bool(net.gateway and ip == net.gateway)
@@ -256,6 +308,7 @@ def _assemble_devices(
         vendor = lookup_vendor(mac)
         device_type, confidence = classify_device(
             hostname=hostname,
+            user_label=user_label,
             vendor=vendor,
             open_ports=open_ports,
             mdns_services=mdns_services,
@@ -269,6 +322,12 @@ def _assemble_devices(
             sources.append("arp")
         if mdns_entry:
             sources.append("mdns")
+        if ssdp_entry:
+            sources.append("ssdp")
+        if netbios_name:
+            sources.append("netbios")
+        if http_title or tls_cn:
+            sources.append("http_tls")
         if is_self:
             sources.append("self")
 
@@ -284,11 +343,16 @@ def _assemble_devices(
                 open_ports=open_ports,
                 services={p: port_discovery.describe_port(p) for p in open_ports},
                 mdns_services=mdns_services,
+                ssdp_services=ssdp_services,
+                netbios_name=netbios_name,
+                http_title=http_title,
+                tls_cn=tls_cn,
                 randomised_mac=is_randomised_mac(mac),
                 is_gateway=is_gateway,
                 is_self=is_self,
                 sources=sources,
                 last_seen=now,
+                user_label=user_label,
             )
         )
 
@@ -309,12 +373,17 @@ def scan_result_from_dict(payload: Dict[str, Any]) -> ScanResult:
             open_ports=list(d.get("open_ports") or []),
             services={int(k): v for k, v in (d.get("services") or {}).items()},
             mdns_services=list(d.get("mdns_services") or []),
+            ssdp_services=list(d.get("ssdp_services") or []),
+            netbios_name=d.get("netbios_name"),
+            http_title=d.get("http_title"),
+            tls_cn=d.get("tls_cn"),
             randomised_mac=bool(d.get("randomised_mac")),
             is_gateway=bool(d.get("is_gateway")),
             is_self=bool(d.get("is_self")),
             sources=list(d.get("sources") or []),
             first_seen=d.get("first_seen"),
             last_seen=d.get("last_seen"),
+            user_label=d.get("user_label"),
         )
         for d in payload.get("devices", [])
     ]
@@ -328,7 +397,6 @@ def scan_result_from_dict(payload: Dict[str, Any]) -> ScanResult:
             summary=f.get("summary", ""),
             detail=f.get("detail", ""),
             what_to_do=f.get("what_to_do", ""),
-            tier=int(f.get("tier", 0)),
             device_id=f.get("device_id"),
             limitations=f.get("limitations", ""),
             evidence=dict(f.get("evidence") or {}),
@@ -344,5 +412,4 @@ def scan_result_from_dict(payload: Dict[str, Any]) -> ScanResult:
         devices=devices,
         findings=findings,
         warnings=list(payload.get("warnings") or []),
-        tier1_included=bool(payload.get("tier1_included")),
     )

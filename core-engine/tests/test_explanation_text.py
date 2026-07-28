@@ -18,8 +18,7 @@ from edgedefense_core.findings import (
     sentence_name,
 )
 from edgedefense_core.models import Device
-from edgedefense_core.tier1.capture import CaptureResult, DeviceTraffic
-from edgedefense_core.tier1.heuristics import detect_dns_bypass, detect_volume_outliers
+
 
 TEXT_FIELDS = ("title", "summary", "detail", "what_to_do", "limitations")
 
@@ -53,23 +52,7 @@ def all_tier0_findings():
     return build_findings(devices)
 
 
-def tier1_findings():
-    capture = CaptureResult(duration_seconds=60.0, packets_seen=10, started_at="t")
-    capture.per_device["192.168.1.22"] = DeviceTraffic(
-        ip="192.168.1.22",
-        contacted_ips={"203.0.113.1", "203.0.113.2", "203.0.113.3"},
-        bytes_sent=900 * 1024 * 1024,
-    )
-    for index in range(2, 6):
-        capture.per_device[f"192.168.1.{index}"] = DeviceTraffic(
-            ip=f"192.168.1.{index}", bytes_sent=1_000_000
-        )
-
-    devices = [device()]
-    return detect_dns_bypass(capture, devices) + detect_volume_outliers(capture, devices)
-
-
-ALL_FINDINGS = all_tier0_findings() + tier1_findings()
+ALL_FINDINGS = all_tier0_findings()
 
 
 def test_every_explanation_code_is_exercised():

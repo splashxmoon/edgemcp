@@ -85,7 +85,7 @@ def test_serves_requests_from_a_directory_with_a_broken_dotenv(tmp_path):
         proc.stdin.flush()
         tools = json.loads(proc.stdout.readline())["result"]["tools"]
 
-        assert len(tools) == 7
+        assert len(tools) == 8
     finally:
         proc.stdin.close()
         proc.terminate()
