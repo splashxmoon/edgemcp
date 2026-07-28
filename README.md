@@ -154,6 +154,43 @@ on. Hosting it on a VPS would work perfectly and tell you about the VPS's
 network, which is not what you want. The arrangement that makes sense is a
 tunnel from a public hostname back to a machine at home.
 
+#### Keeping it running, and shipping updates without breaking the URL
+
+Once other people are using the URL, two things about the simple setup start to
+hurt:
+
+1. **A quick tunnel's hostname is random**, and changes on every restart.
+2. **`serve_remote.py` stops the tunnel when it stops the server**, so restarting
+   to pick up new code silently hands you a different address.
+
+Together those mean a routine deploy breaks every saved connector URL — and it
+breaks quietly, because the old address just stops answering.
+
+`scripts/serve_forever.py` is the supervised version that avoids both:
+
+```bash
+python scripts/serve_forever.py --hostname mcp-tunnel.example.com
+```
+
+It starts the tunnel **once** and leaves it alone. Every five minutes it fetches
+the tracked branch, and when new commits land it fast-forwards and restarts
+*only the server*. The tunnel keeps running throughout, so the public address —
+and every URL anyone has saved — survives the update. Push to `main`, and within
+five minutes the remote server is serving the new code at the same link.
+
+A few deliberate choices:
+
+- **`--ff-only`.** A supervisor that silently creates merge commits on an
+  unattended machine is a way to lose work. A diverged branch is reported and
+  the current code keeps serving.
+- **The tunnel is restarted only if it actually dies.** Restarting a healthy
+  tunnel is the one thing guaranteed to break the URL.
+- **`--check-every 0`** disables auto-updating if you would rather deploy by
+  hand.
+
+Without `--hostname` it falls back to a quick tunnel and prints a warning: the
+address is then only stable for as long as that tunnel process lives.
+
 #### Getting a public URL
 
 Start with a quick tunnel. It needs no DNS changes at all and proves the whole
