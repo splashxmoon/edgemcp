@@ -106,9 +106,15 @@ def main() -> int:
 
     # Loopback only. The tunnel reaches the server locally, so there is no
     # reason to expose the port to the rest of the network as well.
+    # --json-response is not optional for this script's purpose. Anything
+    # reaching the server through a tunnel is behind at least one intermediary,
+    # and often a serverless platform that routes each request to a different
+    # instance. Streaming responses get buffered, and stateful sessions break
+    # the moment two requests land on different instances -- which shows up as
+    # initialize succeeding and every call after it returning 400.
     server = subprocess.Popen(
         [sys.executable, "-m", "edgedefense_mcp", "--http",
-         "--port", str(args.port), "--allow-host", "*"],
+         "--port", str(args.port), "--allow-host", "*", "--json-response"],
         env={**os.environ, "EDGEDEFENSE_TOKEN": token},
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
@@ -121,23 +127,31 @@ def main() -> int:
             return 1
 
         print("Opening tunnel ...")
+        # cloudflared logs continuously for as long as it runs. Handing it a
+        # pipe and then reading only until the URL appears leaves the rest
+        # unread; once the OS pipe buffer fills, cloudflared blocks on write and
+        # the tunnel silently stops serving while the process still looks alive.
+        # A file has no such limit, so the URL is polled out of it instead.
+        log_path = REPO_ROOT / ".cloudflared-tunnel.log"
+        log_handle = open(log_path, "w", encoding="utf-8")
         tunnel = subprocess.Popen(
             [cloudflared, "tunnel", "--url", f"http://127.0.0.1:{args.port}",
              "--no-autoupdate"],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, encoding="utf-8", errors="replace", bufsize=1,
+            stdout=log_handle, stderr=subprocess.STDOUT,
         )
 
         public = None
         deadline = time.time() + 60
         while time.time() < deadline and tunnel.poll() is None:
-            line = tunnel.stdout.readline()
-            if not line:
-                continue
-            match = TUNNEL_URL_RE.search(line)
+            try:
+                match = TUNNEL_URL_RE.search(log_path.read_text(encoding="utf-8",
+                                                                errors="replace"))
+            except OSError:
+                match = None
             if match:
                 public = match.group(0)
                 break
+            time.sleep(1)
 
         if not public:
             print("Tunnel did not report a URL. Is cloudflared able to reach the "
