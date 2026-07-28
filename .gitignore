@@ -28,3 +28,4 @@ htmlcov/
 # Local scan history must never be committed: it describes a real network.
 *.sqlite3
 edgedefense.sqlite3
+.edgedefense-token

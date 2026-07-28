@@ -68,6 +68,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--port", type=int, default=DEFAULT_PORT,
         help=f"port to bind in HTTP mode (default: {DEFAULT_PORT})",
     )
+    transport.add_argument(
+        "--json-response", action="store_true",
+        help=(
+            "reply with plain JSON instead of a server-sent-event stream. Needed when "
+            "something sits in front of this server -- CDNs and site hosts frequently "
+            "buffer or cut SSE, which breaks the connection in ways that are hard to "
+            "diagnose"
+        ),
+    )
 
     security = parser.add_argument_group("security")
     security.add_argument(
@@ -172,6 +181,13 @@ def run_http(args: argparse.Namespace) -> int:
         return 1
 
     from .server import mcp
+
+    if args.json_response:
+        # Plain request/response survives an intermediary that does not handle
+        # streaming. Stateless too, so a proxy is free to route each request
+        # wherever it likes without breaking session affinity.
+        mcp.settings.json_response = True
+        mcp.settings.stateless_http = True
 
     allowed: List[str] = list(args.allow_host)
     if not allowed:
