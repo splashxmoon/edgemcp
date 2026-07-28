@@ -69,7 +69,7 @@ async def run_scan(
     storage: Optional[Storage] = None,
     network: Optional[LocalNetwork] = None,
 ) -> ScanResult:
-    """Run a Tier 0 scan: discovery, identification, scoring inputs.
+    """Run a scan: discovery, identification, scoring inputs.
 
     Requires no elevated privileges. Every step degrades gracefully -- a failure
     in one discovery method reduces detail rather than aborting the scan.

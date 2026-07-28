@@ -102,7 +102,7 @@ def run(coro):
 
 
 def test_every_tool_is_registered_read_only():
-    """Nothing in the free tier may modify the network."""
+    """No tool may modify the network."""
     tools = run(srv.mcp.list_tools())
     assert len(tools) == 11
     for tool in tools:

@@ -100,7 +100,7 @@ def name_with_ip(device: Device) -> str:
 
 
 def _device_findings(device: Device) -> List[Finding]:
-    """Every finding derivable from a single device's Tier 0 data."""
+    """Every finding derivable from a single device's scan data."""
     findings: List[Finding] = []
     # `name` goes into templates that also print {ip}; `where` is the
     # self-contained form used for titles and one-line summaries.
@@ -262,7 +262,7 @@ def _device_findings(device: Device) -> List[Finding]:
 
 
 def build_findings(devices: Iterable[Device]) -> List[Finding]:
-    """Generate the full Tier 0 finding list, most severe first."""
+    """Generate the full finding list, most severe first."""
     findings: List[Finding] = []
     for device in devices:
         findings.extend(_device_findings(device))

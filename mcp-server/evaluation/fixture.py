@@ -78,5 +78,4 @@ def install_fixture() -> ScanResult:
 
     result = build_fixture_result()
     srv._last_result = result
-    srv._tier1_findings = []
     return result

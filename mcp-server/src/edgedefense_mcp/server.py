@@ -302,7 +302,6 @@ async def edgedefense_scan_network(
                     "detail": str,
                     "what_to_do": str,
                     "limitations": str,
-                    "tier": int,
                     "device_id": str | null,
                     "evidence": object
                 }
@@ -516,9 +515,9 @@ async def edgedefense_get_trust_score(
     """Compute the 0-100 network trust score with the reasons behind it.
 
     The score starts at 100 and subtracts points for exposed risky services,
-    unidentified devices, unusually broad attack surface, and (if traffic
-    analysis has run) traffic anomalies. Each category is capped so no single
-    issue dominates. Every deduction traces to a finding the user can read.
+    unidentified devices, and unusually broad attack surface. Each category is
+    capped so no single issue dominates. Every deduction traces to a finding
+    the user can read.
 
     The scoring is deliberately calibrated so that an ordinary, well-configured
     home network scores in the 90s. A low score means something real.
@@ -555,10 +554,7 @@ async def edgedefense_get_trust_score(
     if result is None:
         return _NO_SCAN_MESSAGE
 
-    findings = result.findings
-    score = compute_trust_score(
-        result.devices, findings
-    )
+    score = compute_trust_score(result.devices, result.findings)
 
     if response_format == ResponseFormat.JSON:
         return to_json(score.to_dict())

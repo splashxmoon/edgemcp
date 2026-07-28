@@ -415,12 +415,18 @@ user runs a packet capture on it.
 
 ### Current scope
 
-**In:** Zero-permission discovery and identification.
+**In:** Zero-permission discovery, identification, and performance measurement.
 
-**Out, by decision rather than by omission:** the ML pipeline (Tier 2),
-destructive tools such as `block_device`, and Core/Home product features. A free
-tool installed sixty seconds ago should not be able to disconnect things from
-your network; enforcement belongs in a product you have decided to trust.
+**Out, by decision rather than by omission:** the ML pipeline, packet-capture
+traffic analysis, destructive tools such as `block_device`, and Core/Home
+product features. A free tool installed sixty seconds ago should not be able to
+disconnect things from your network; enforcement belongs in a product you have
+decided to trust.
+
+Packet capture is out for a harder reason than the others: it needs elevated
+privileges on every platform, which would break the "no admin rights" promise
+that makes this safe to install on a whim. Anything requiring `sudo` or a
+capture driver belongs in the paid product, not here.
 
 ## Development
 

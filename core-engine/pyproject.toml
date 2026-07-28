@@ -20,7 +20,7 @@ classifiers = [
     "Topic :: System :: Networking :: Monitoring",
 ]
 
-# Deliberately empty. Tier 0 uses only the standard library, which is what makes
+# Deliberately empty. The engine uses only the standard library, which is what makes
 # "no elevated permissions, no surprises" a claim we can actually stand behind.
 dependencies = []
 

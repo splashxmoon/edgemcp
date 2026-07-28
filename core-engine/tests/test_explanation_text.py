@@ -37,8 +37,8 @@ def device(**kw) -> Device:
     return Device(**defaults)
 
 
-def all_tier0_findings():
-    """One device per shape, covering every Tier 0 finding code."""
+def all_findings():
+    """One device per shape, covering every finding code."""
     devices = [
         device(open_ports=[23, 21, 5900, 5555, 7547, 3389, 445, 6379]),
         device(device_id="bb:bb:bb:00:00:02", ip="192.168.1.23",
@@ -52,7 +52,7 @@ def all_tier0_findings():
     return build_findings(devices)
 
 
-ALL_FINDINGS = all_tier0_findings()
+ALL_FINDINGS = all_findings()
 
 
 def test_every_explanation_code_is_exercised():
