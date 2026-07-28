@@ -2,7 +2,7 @@
 
 # EdgeDefense MCP
 
-**Ask Claude about your home network.** Runs entirely on your machine — no account, no cloud, no admin rights.
+**Ask Claude about your home network.** Runs on your machine — no account, no admin rights, and nothing sent anywhere except the one speed test you have to ask for.
 
 <br clear="left">
 
@@ -19,7 +19,14 @@ You know something is connected to your wifi. You have no idea what it is. Most 
 
 This one lets you just ask. Point Claude (or Cursor, or any MCP client) at your network and talk to it in plain English: what's connected, what that unknown thing at `192.168.1.47` probably is, and whether anything looks wrong.
 
-Everything happens on your computer. Nothing is uploaded, nothing is logged to a server, and there is nothing to sign up for.
+It answers the other half of the question too — *why is this slow?* — which is usually a weak Wi-Fi signal or a crowded channel rather than anything to do with your internet plan:
+
+> "Why is my wifi slow?"
+> "Is the problem my wifi or my ISP?"
+> "How fast is my internet actually?"
+> "Why do my video calls break up when someone else is downloading?"
+
+Everything happens on your computer, with one exception you invoke yourself: measuring download speed means transferring real data with a server on the internet, so `edgedefense_speed_test` does exactly that and nothing else does. Nothing is uploaded, nothing is logged to a server, and there is nothing to sign up for.
 
 ## Why it's different
 
@@ -29,7 +36,7 @@ Two promises make it safe to install on a whim:
 
 **It needs no special permissions.** Everything above works as a regular user. No `sudo`, no "run as administrator", no driver to install.
 
-**It never phones home.** Not for updates, not for analytics, not even to look up who made a device — that database ships inside the package. There is no HTTP client anywhere in the code. You can verify that yourself in about ten minutes; the whole thing is a few thousand lines with zero runtime dependencies.
+**It never phones home.** Not for updates, not for analytics, not even to look up who made a device — that database ships inside the package. There is exactly one tool that talks to the internet, `edgedefense_speed_test`, and only because measuring download speed is impossible without transferring real data. It is the only one, it never runs on its own, and it is marked as reaching outside your machine so your client can tell you before it runs. You can verify all of this yourself in about ten minutes; the whole thing is a few thousand lines with zero runtime dependencies.
 
 It is also **read-only by design**. There is deliberately no "block this device" button. A tool you installed sixty seconds ago should not be able to disconnect things from your network.
 
@@ -45,6 +52,25 @@ It is also **read-only by design**. There is deliberately no "block this device"
 | `edgedefense_local_security` | Checks the Wi-Fi security, DNS, and open ports on the machine running the server |
 | `edgedefense_get_trust_score` | A single 0–100 score for your network, with the reasons behind it |
 | `edgedefense_explain_finding` | Turns any flagged issue into a plain-English explanation of what it means and what to do |
+
+And for when the network is *working*, but badly:
+
+| Tool | What you get |
+|---|---|
+| `edgedefense_network_stats` | Live upload/download rate per adapter, packet errors, Wi-Fi signal strength, and how many neighbours are crowding your channel. **Start here for "why is it slow".** |
+| `edgedefense_latency_check` | Round trip to your router, jitter, packet loss, and how long each of your DNS servers takes to answer |
+| `edgedefense_speed_test` | Actual download and upload speed in Mbps, plus bufferbloat. ⚠️ The one tool that contacts the internet |
+
+The first two are the interesting ones. "My internet is slow" is usually a weak
+Wi-Fi signal or a crowded channel, and a speed test cannot tell you that — it
+just gives you a smaller number. `edgedefense_network_stats` tells you the
+signal is −78 dBm and four neighbours are sitting on your channel, which is an
+answer you can act on.
+
+`edgedefense_speed_test` also reports **bufferbloat**: how far latency climbs
+while the connection is saturated. That, not bandwidth, is usually why a video
+call falls apart the moment someone else starts a download — and it is fixed in
+your router's settings rather than by paying for a faster plan.
 
 
 ## Install
@@ -212,7 +238,8 @@ to offer both methods on the sign-in page.
 > Google while somebody is signing in — that is unavoidable for any identity
 > provider. Scanning still makes no outbound request of any kind, and no
 > network data is ever sent anywhere. If you would rather the server never
-> talk to anything, use the passphrase.
+> talk to anything, use the passphrase — and leave `edgedefense_speed_test`
+> alone, which is the only other tool that reaches outside your machine.
 
 #### With a token in the URL (simpler)
 
@@ -362,13 +389,25 @@ package. This is a standing architectural constraint, not a future TODO.
 
 1. **Nothing phones home.** No outbound network request is made by any shipped
    code path, for any purpose, including analytics. Vendor lookups read a
-   bundled database on disk. The single exception is
-   `core-engine/scripts/update_oui.py`, a maintainer-run script that is not part
-   of the distributed package and is documented as such in its own docstring.
+   bundled database on disk. There are exactly two exceptions, both deliberate
+   and both narrow:
+
+   - `core-engine/scripts/update_oui.py`, a maintainer-run script that is not
+     part of the distributed package and is documented as such in its own
+     docstring.
+   - `core-engine/src/edgedefense_core/perf/speedtest.py`, which transfers data
+     to and from a public speed test service. Throughput cannot be measured any
+     other way. It is confined to that one module, is imported by nothing else,
+     never runs as part of a scan, and its tool is the only one carrying
+     `openWorldHint: true`. A test asserts that it stays the only one — if you
+     add a second outbound tool, `test_only_the_speed_test_reaches_outside_this_machine`
+     fails, and that failure is the point.
 
 2. **Needs no elevated privileges.** Device discovery, identification,
-   port fingerprinting and the trust score all run as an ordinary user on
-   Windows, macOS and Linux.
+   port fingerprinting, the trust score and every performance check all run as
+   an ordinary user on Windows, macOS and Linux. Latency measurement shells out
+   to the system `ping` rather than opening a raw socket, precisely so it does
+   not need root.
 
 Both are load-bearing for the product's premise. A privacy tool that quietly
 calls an external API loses the argument permanently the first time a technical

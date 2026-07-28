@@ -22,9 +22,17 @@ service, for any purpose. Vendor lookups read a bundled CSV
 load-bearing for the product's premise, not an implementation detail — do not
 add a remote fallback anywhere in this package.
 
+There is one deliberate exception: `perf/speedtest.py` transfers real data to
+and from a public speed test service, because throughput cannot be measured any
+other way. It is confined to that single module, imported by nothing else here,
+and never runs as part of a scan. **The exception does not generalise** — it is
+not a precedent for adding a remote lookup, a fallback, or a "just this once"
+API call anywhere else in this package.
+
 **Needs no elevated privileges.** `scan`, `discovery`, `classify`,
-`findings` and `scoring` all run as an ordinary user on Windows, macOS and
-Linux.
+`findings`, `scoring` and `perf` all run as an ordinary user on Windows, macOS
+and Linux. `perf/latency.py` shells out to the system `ping` rather than
+opening a raw ICMP socket specifically to avoid needing root.
 
 ## What is deliberately not here
 

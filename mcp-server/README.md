@@ -11,7 +11,9 @@ An MCP server that answers those questions in plain English. It runs entirely
 on your machine.
 
 - **No account.** Nothing to sign up for.
-- **No cloud.** Makes zero outbound network requests — including analytics.
+- **No cloud.** No telemetry, no analytics, no update checks. One tool
+  (`edgedefense_speed_test`) contacts a public speed test service, because
+  measuring throughput requires it; everything else stays on your machine.
 - **No admin rights.** Everything above works as a normal user.
 - **Read-only.** It cannot block, disconnect, or change anything.
 
@@ -144,7 +146,23 @@ entirely.
 This is a security tool asking to look at your network, so the claims below are
 stated precisely rather than reassuringly.
 
-**It makes no outbound network requests. At all.**
+**One tool leaves your machine. Exactly one, and only when you ask for it.**
+
+`edgedefense_speed_test` transfers data to and from `speed.cloudflare.com` to
+measure throughput. There is no way to measure download speed without doing
+this. It needs no account or API key, nothing identifying is attached beyond
+what any HTTPS request unavoidably reveals, and the service's response includes
+your public IP address — which this tool deliberately discards rather than
+reporting back to you. It never runs as part of a scan, and it is the only tool
+marked `openWorldHint: true`, which is how your MCP client knows to tell you an
+action reaches outside your machine.
+
+`edgedefense_latency_check` sends packets, but only to your own router and to
+the DNS servers your machine already uses. `edgedefense_network_stats`
+transmits nothing at all — it reads operating system counters and the wireless
+radio's view of the air around it.
+
+**Everything else makes no outbound network requests at all.**
 
 - No telemetry, no analytics, no crash reporting, no update checks.
 - Manufacturer identification uses a vendor database bundled inside the package
@@ -180,6 +198,10 @@ on your local network. Roughly the traffic of loading one web page.
 | **Open ports** | What services each device is offering, and what each one is for |
 | **Trust score** | A 0–100 number with the reasons behind it |
 | **Plain-English explanations** | What any finding means, why it matters, and what it *cannot* tell you |
+| **Adapter throughput** | Live upload and download rate per adapter, plus packet error and drop rates |
+| **Wi-Fi link quality** | Signal in dBm, band, channel, negotiated rate, and how many neighbours share your channel |
+| **Latency and DNS** | Round trip to your router, jitter, packet loss, and per-resolver lookup time |
+| **Speed and bufferbloat** | Real Mbps in both directions, and how far latency climbs under load |
 
 
 ---
@@ -194,6 +216,9 @@ on your local network. Roughly the traffic of loading one web page.
 | `edgedefense_get_device_detail` | Everything known about one device |
 | `edgedefense_name_device` | Assigns a friendly name to a device so you can track it |
 | `edgedefense_local_security` | Checks the Wi-Fi security, DNS, and open ports on the machine running the server |
+| `edgedefense_network_stats` | Live throughput per adapter, packet errors, Wi-Fi signal and channel congestion |
+| `edgedefense_latency_check` | Round trip to your router, jitter, packet loss, and DNS resolver timing |
+| `edgedefense_speed_test` | Download and upload speed in Mbps, plus bufferbloat. ⚠️ Contacts an external service |
 | `edgedefense_get_trust_score` | The 0–100 score, with reasons |
 | `edgedefense_explain_finding` | Turn a flagged issue into a plain-English explanation |
 
