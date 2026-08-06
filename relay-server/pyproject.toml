@@ -9,7 +9,8 @@ dependencies = [
     "websockets",
     "pydantic",
     "python-jose[cryptography]",
-    "sse-starlette"
+    "sse-starlette",
+    "python-multipart"
 ]
 
 [build-system]
