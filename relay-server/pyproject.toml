@@ -9,7 +9,7 @@ dependencies = [
     "websockets",
     "pydantic",
     "python-jose[cryptography]",
-    "mcp",
+    "mcp>=1.28.0",
     "sse-starlette",
     "supabase"
 ]
