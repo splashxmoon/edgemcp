@@ -38,7 +38,7 @@ def register_tools(mcp_app):
     @mcp_app.tool()
     async def edgedefense_scan_network(scan_depth: str = "quick", response_format: str = "markdown") -> str:
         """Discover every device on the local network and summarise what is there."""
-        global _last_scan_time, _devices
+        global _last_scan_time
         _last_scan_time = time.time()
         
         # On Render, we can't easily arp the whole subnet without root, so we check localhost and default gateway

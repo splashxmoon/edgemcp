@@ -107,7 +107,7 @@ async def oauth_token(request: Request):
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "cloud_mcp": True, "agent_connected": active_agent_ws is not None}
+    return {"status": "ok", "cloud_mcp": True, "agent_connected": not active_agent_queue.empty()}
 
 
 # --- Relay Architecture (HTTP Long Polling) ---
