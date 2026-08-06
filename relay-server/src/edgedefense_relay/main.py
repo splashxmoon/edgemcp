@@ -97,29 +97,30 @@ async def health_check():
     return {"status": "ok", "cloud_mcp": True, "agent_connected": active_agent_ws is not None}
 
 
-# --- Relay Architecture ---
+# --- Relay Architecture (HTTP Long Polling) ---
 
 # State
-active_agent_ws: WebSocket = None
+active_agent_queue: asyncio.Queue = asyncio.Queue()
 active_sse_queues: Dict[str, asyncio.Queue] = {}
 
-@app.websocket("/relay/ws/agent")
-async def websocket_agent_endpoint(websocket: WebSocket):
-    global active_agent_ws
-    await websocket.accept()
-    active_agent_ws = websocket
-    print("Edge Agent connected to Cloud Relay!")
+@app.get("/relay/poll")
+async def relay_poll():
+    """Edge Agent long-polls this endpoint to receive commands from Claude"""
     try:
-        while True:
-            data = await websocket.receive_text()
-            # The agent sends responses. We forward them to the SSE queues.
-            # In a multi-client setup, we'd route by session_id.
-            # Here we broadcast to all active SSE connections (usually just Claude Desktop)
-            for q in active_sse_queues.values():
-                await q.put(data)
-    except WebSocketDisconnect:
-        print("Edge Agent disconnected.")
-        active_agent_ws = None
+        # Wait up to 30 seconds for a message
+        msg = await asyncio.wait_for(active_agent_queue.get(), timeout=30.0)
+        return JSONResponse(status_code=200, content={"message": msg})
+    except asyncio.TimeoutError:
+        return JSONResponse(status_code=200, content={"message": None})
+
+@app.post("/relay/send")
+async def relay_send(request: Request):
+    """Edge Agent POSTs responses here, which are forwarded to Claude's SSE"""
+    body = await request.body()
+    data = body.decode("utf-8")
+    for q in active_sse_queues.values():
+        await q.put(data)
+    return JSONResponse(status_code=202, content="Accepted")
 
 @app.get("/mcp/connect")
 async def mcp_connect(request: Request):
@@ -155,14 +156,11 @@ async def mcp_messages(request: Request):
     session_id = request.query_params.get("session_id")
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id required")
-    
-    if not active_agent_ws:
-        raise HTTPException(status_code=503, detail="No Edge Agent connected to Relay")
         
     body = await request.body()
     try:
-        # Forward directly to the Edge Agent over WebSocket
-        await active_agent_ws.send_text(body.decode("utf-8"))
+        # Queue the message for the Edge Agent to pick up
+        await active_agent_queue.put(body.decode("utf-8"))
         return JSONResponse(status_code=202, content="Accepted")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
