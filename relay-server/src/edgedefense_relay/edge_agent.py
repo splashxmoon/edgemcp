@@ -16,7 +16,7 @@ def run_mcp_server():
 
 async def run_websocket_bridge():
     """Connects to the cloud relay and bridges WebSocket to the local MCP server"""
-    uri = "wss://edgedefense-relay.onrender.com/ws/agent"
+    uri = "wss://www.edgedefenseai.com/relay/ws/agent"
     print(f"Connecting to Cloud Relay at {uri}...")
     
     while True:

@@ -103,7 +103,7 @@ async def health_check():
 active_agent_ws: WebSocket = None
 active_sse_queues: Dict[str, asyncio.Queue] = {}
 
-@app.websocket("/ws/agent")
+@app.websocket("/relay/ws/agent")
 async def websocket_agent_endpoint(websocket: WebSocket):
     global active_agent_ws
     await websocket.accept()
