@@ -842,7 +842,6 @@ async def edgedefense_name_device(
     Returns:
         str: Confirmation message.
     """
-    global _last_result
 
     result = _current_result()
     if result is None:
