@@ -160,6 +160,11 @@ Telnet is an unencrypted, legacy protocol. Credentials and commands are sent in 
 # Mount the MCP server to FastAPI
 app.mount("/mcp", mcp_app.sse_app())
 
+@app.get("/mcp_debug")
+async def mcp_debug():
+    tools = await mcp_app.list_tools()
+    return {"tools": [t.name for t in tools]}
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "cloud_mcp": True}
