@@ -1,0 +1,14 @@
+[10:11:57] Server up on 127.0.0.1:8765 at 5202d776
+[10:12:14] Quick tunnel: https://queries-nurse-temperature-spam.trycloudflare.com
+[10:12:14] This address CHANGES if the tunnel restarts. Use --hostname for a permanent one.
+[10:12:23] Published the new upstream to the site repo; a redeploy should follow.
+
+  Upstream origin (set EDGEDEFENSE_UPSTREAM to this): https://queries-nurse-temperature-spam.trycloudflare.com
+  Direct MCP URL:                                     https://queries-nurse-temperature-spam.trycloudflare.com/t/W5rkIGArVjtgQEsVPRDkgPhOi2gK3_BVs9d6q1gz6J8/mcp
+
+  Treat the URL as a password: it grants a full inventory of this network.
+  Ctrl+C to stop.
+
+[10:17:28] Updated 5202d776 -> 4459331e
+[10:17:28] Restarting server to pick up new code (tunnel untouched).
+[10:17:39] Back up. Same URL, new code.

@@ -218,6 +218,52 @@ def log(message: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
 
 
+UPSTREAM_RE = re.compile(r"(export const UPSTREAM_FALLBACK = ')([^']*)(';)")
+
+
+def publish_upstream(site_repo: Path, origin: str) -> bool:
+    """Write the tunnel origin into the site repo and push it.
+
+    This closes the loop for quick tunnels. The site's MCP proxy has to know
+    the current tunnel hostname; that hostname is only knowable here, on the
+    machine the tunnel points at; and it changes without warning. So the
+    machine that knows publishes it, and the site redeploys itself.
+
+    Only that one file is committed. Whatever else is in the site working tree
+    is somebody's work in progress and is none of this script's business.
+    """
+    target = site_repo / "app" / "mcp" / "upstream.js"
+    if not target.is_file():
+        log(f"No upstream.js at {target}; skipping publish.")
+        return False
+
+    text = target.read_text(encoding="utf-8")
+    match = UPSTREAM_RE.search(text)
+    if not match:
+        log("upstream.js does not have the expected shape; leaving it alone.")
+        return False
+    if match.group(2) == origin:
+        return False  # Already correct; an empty commit would just be noise.
+
+    target.write_text(UPSTREAM_RE.sub(rf"\g<1>{origin}\g<3>", text, count=1), encoding="utf-8")
+
+    def run(*args: str) -> int:
+        return subprocess.run(args, cwd=site_repo, capture_output=True).returncode
+
+    if run("git", "add", "app/mcp/upstream.js") != 0:
+        log("Could not stage upstream.js.")
+        return False
+    if run("git", "commit", "-m", f"Point the MCP proxy at {origin}") != 0:
+        log("Nothing to commit, or the commit failed.")
+        return False
+    if run("git", "push", "origin", "HEAD") != 0:
+        log("Push failed -- check credentials for the site repo.")
+        return False
+
+    log("Published the new upstream to the site repo; a redeploy should follow.")
+    return True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--port", type=int, default=8765)
@@ -230,6 +276,16 @@ def main() -> int:
         ),
     )
     parser.add_argument("--branch", default="main", help="branch to track (default main)")
+    parser.add_argument(
+        "--site-repo",
+        default=os.environ.get("EDGEDEFENSE_SITE_REPO"),
+        help=(
+            "Path to the website repo. When a quick tunnel changes address, the "
+            "new origin is committed to app/mcp/upstream.js and pushed, so the "
+            "proxy redeploys pointing at the right place. Unnecessary with "
+            "--hostname, whose address never changes."
+        ),
+    )
     parser.add_argument(
         "--check-every",
         type=float,
@@ -270,6 +326,10 @@ def main() -> int:
 
     url = f"{public}/t/{token}/mcp"
     URL_FILE.write_text(url, encoding="utf-8")
+
+    site_repo = Path(args.site_repo).expanduser() if args.site_repo else None
+    if site_repo and not args.hostname:
+        publish_upstream(site_repo, public)
     print()
     print(f"  Upstream origin (set EDGEDEFENSE_UPSTREAM to this): {public}")
     print(f"  Direct MCP URL:                                     {url}")
@@ -296,8 +356,12 @@ def main() -> int:
                         url = f"{public}/t/{token}/mcp"
                         URL_FILE.write_text(url, encoding="utf-8")
                         log(f"NEW quick-tunnel address: {public}")
-                        log("EDGEDEFENSE_UPSTREAM must be updated to match, or the "
-                            "public URL stays broken.")
+                        if site_repo:
+                            publish_upstream(site_repo, public)
+                        else:
+                            log("Nothing points at this yet. Pass --site-repo to have "
+                                "the new address published automatically, or update "
+                                "EDGEDEFENSE_UPSTREAM by hand.")
 
             if server.poll() is not None:
                 log("Server exited; restarting it.")

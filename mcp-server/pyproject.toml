@@ -25,6 +25,7 @@ classifiers = [
 dependencies = [
     "mcp>=1.2.0",
     "edgedefense-core>=0.1.0",
+    "websockets>=11.0",
 ]
 
 [project.optional-dependencies]

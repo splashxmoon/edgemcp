@@ -60,6 +60,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="serve Streamable HTTP instead of stdio (for remote connectors)",
     )
     transport.add_argument(
+        "--uplink",
+        metavar="URL",
+        default=None,
+        help="connect to a central relay server via WebSocket (e.g. wss://www.edgedefenseai.com/relay/uplink)",
+    )
+    transport.add_argument(
+        "--uplink-token",
+        metavar="TOKEN",
+        default=None,
+        help="authentication token for the uplink relay server",
+    )
+    transport.add_argument(
         "--host",
         default="127.0.0.1",
         help="address to bind in HTTP mode (default: 127.0.0.1, loopback only)",
@@ -292,6 +304,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.http:
         return run_http(args)
+
+    if args.uplink:
+        from .uplink import run_uplink
+        return run_uplink(args)
 
     # stdio: the default path, unchanged and dependency-free.
     from .server import mcp

@@ -1,0 +1,21 @@
+[project]
+name = "edgedefense-relay"
+version = "0.1.0"
+description = "Central relay server for EdgeDefense MCP"
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "websockets",
+    "pydantic",
+    "python-jose[cryptography]",
+    "mcp",
+    "sse-starlette"
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+edgedefense-relay = "edgedefense_relay.main:run"
