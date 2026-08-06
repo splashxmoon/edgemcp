@@ -109,6 +109,7 @@ from mcp.server.fastmcp import FastMCP
 import time
 
 # --- MCP Cloud Server ---
+from edgedefense_relay.mcp_tools import register_tools
 from mcp.server.sse import TransportSecuritySettings
 
 security_settings = TransportSecuritySettings(
@@ -122,45 +123,8 @@ mcp_app = FastMCP(
     transport_security=security_settings
 )
 
-@mcp_app.tool()
-async def edgedefense_scan_network(scan_depth: str = "quick", response_format: str = "markdown") -> str:
-    """Discover every device on the local network and summarise what is there.
-    
-    Args:
-        scan_depth (str): 'quick' or 'full'.
-        response_format (str): 'markdown' or 'json'.
-    """
-    if response_format == "json":
-        return '{"devices": [], "findings": []}'
-    
-    return """**Scan Complete** (Mock Data for Cloud Demo)
-- **12** devices discovered.
-- Network Trust Score: **85/100**
-- Finding: **Telnet Exposed** on 192.168.1.45 (Smart Plug)."""
-
-@mcp_app.tool()
-async def edgedefense_list_devices(filter_type: str = "all", response_format: str = "markdown") -> str:
-    """List devices found by the most recent scan."""
-    return """1. **Router** (192.168.1.1)
-2. **Laptop** (192.168.1.15)
-3. **Smart Plug** (192.168.1.45) [FLAGGED]
-4. **Smart TV** (192.168.1.100)"""
-
-@mcp_app.tool()
-async def edgedefense_get_trust_score(response_format: str = "markdown") -> str:
-    """Compute the 0-100 network trust score with the reasons behind it."""
-    return """**Trust Score: 85 (Good)**
-
-*Deductions:*
-- -15 points: Telnet (port 23) is exposed on a Smart Plug (192.168.1.45)."""
-
-@mcp_app.tool()
-async def edgedefense_explain_finding(finding_id: str, response_format: str = "markdown") -> str:
-    """Explain what a flagged issue means, why it matters, and what to do."""
-    return """**Telnet Exposed**
-Telnet is an unencrypted, legacy protocol. Credentials and commands are sent in plain text, making them trivial to intercept.
-*Recommendation*: Disable Telnet on the device and use SSH if remote access is required."""
-
+# Register all 11 fully functional tools
+register_tools(mcp_app)
 
 # Mount the MCP server to FastAPI
 app.mount("/mcp", mcp_app.sse_app())

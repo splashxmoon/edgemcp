@@ -11,7 +11,10 @@ dependencies = [
     "python-jose[cryptography]",
     "mcp==1.28.1",
     "sse-starlette",
-    "supabase"
+    "supabase",
+    "speedtest-cli",
+    "psutil",
+    "mac-vendor-lookup"
 ]
 
 [build-system]
