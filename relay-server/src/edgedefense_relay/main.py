@@ -59,6 +59,19 @@ async def oauth_generate_code(req: GenerateCodeReq):
     }
     return {"code": code}
 
+@app.get("/.well-known/oauth-authorization-server")
+async def oauth_metadata():
+    return {
+        "issuer": "https://www.edgedefenseai.com",
+        "authorization_endpoint": "https://www.edgedefenseai.com/oauth/authorize",
+        "token_endpoint": "https://www.edgedefenseai.com/oauth/token",
+        "registration_endpoint": "https://www.edgedefenseai.com/oauth/register",
+        "scopes_supported": ["mcp"],
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code"],
+        "code_challenge_methods_supported": ["S256"]
+    }
+
 @app.post("/oauth/token")
 async def oauth_token(request: Request):
     form = await request.form()
