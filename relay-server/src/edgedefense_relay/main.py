@@ -86,9 +86,10 @@ async def websocket_uplink(websocket: WebSocket, token: str):
 
 
 # --- 2. SSE Endpoint for Claude.ai ---
-@app.get("/mcp/connect")
-async def mcp_connect_get(request: Request, user_id: str = Depends(get_user_id_from_header)):
+@app.get("/mcp/connect/{token}")
+async def mcp_connect_get(token: str, request: Request):
     """Claude.ai connects here to receive SSE messages."""
+    user_id = await get_user_id(token)
     logger.info(f"SSE connection opened for user {user_id}")
     
     # Create a new queue for this SSE connection
@@ -101,7 +102,7 @@ async def mcp_connect_get(request: Request, user_id: str = Depends(get_user_id_f
             # We need to tell the client where to send POST requests
             yield {
                 "event": "endpoint",
-                "data": "/mcp/connect"
+                "data": f"/mcp/connect/{token}"
             }
             
             while True:
@@ -121,9 +122,11 @@ async def mcp_connect_get(request: Request, user_id: str = Depends(get_user_id_f
 
 
 # --- 3. POST Endpoint for Claude.ai ---
-@app.post("/mcp/connect")
-async def mcp_connect_post(request: Request, user_id: str = Depends(get_user_id_from_header)):
+@app.post("/mcp/connect/{token}")
+async def mcp_connect_post(token: str, request: Request):
     """Claude.ai posts JSON-RPC messages here."""
+    user_id = await get_user_id(token)
+    
     # Read the raw JSON-RPC payload
     body = await request.body()
     payload = body.decode("utf-8")
