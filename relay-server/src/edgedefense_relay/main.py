@@ -86,6 +86,11 @@ async def websocket_uplink(websocket: WebSocket, token: str):
 
 
 # --- 2. SSE Endpoint for Claude.ai ---
+@app.get("/mcp/connect")
+async def mcp_connect_get_no_token():
+    """Fallback if the user omits the token in the URL"""
+    raise HTTPException(status_code=401, detail="Missing token. Please use the full URL from the EdgeDefenseAI authorization page.")
+
 @app.get("/mcp/connect/{token}")
 async def mcp_connect_get(token: str, request: Request):
     """Claude.ai connects here to receive SSE messages."""
@@ -122,6 +127,11 @@ async def mcp_connect_get(token: str, request: Request):
 
 
 # --- 3. POST Endpoint for Claude.ai ---
+@app.post("/mcp/connect")
+async def mcp_connect_post_no_token():
+    """Fallback if the user omits the token in the URL"""
+    raise HTTPException(status_code=401, detail="Missing token. Please use the full URL from the EdgeDefenseAI authorization page.")
+
 @app.post("/mcp/connect/{token}")
 async def mcp_connect_post(token: str, request: Request):
     """Claude.ai posts JSON-RPC messages here."""
