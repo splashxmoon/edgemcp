@@ -23,7 +23,9 @@ classifiers = [
 ]
 
 dependencies = [
-    "mcp>=1.2.0",
+    "httpx",
+    "mcp==1.29.0",
+    "supabase",
     "edgedefense-core>=0.1.0",
     "websockets>=11.0",
 ]
