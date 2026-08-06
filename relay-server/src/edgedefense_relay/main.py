@@ -115,7 +115,12 @@ security_settings = TransportSecuritySettings(
     enable_dns_rebinding_protection=False
 )
 
-mcp_app = FastMCP("edgedefense_mcp", sse_path="/connect", transport_security=security_settings)
+mcp_app = FastMCP(
+    "edgedefense_mcp", 
+    sse_path="/connect", 
+    message_path="/messages",
+    transport_security=security_settings
+)
 
 @mcp_app.tool()
 async def edgedefense_scan_network(scan_depth: str = "quick", response_format: str = "markdown") -> str:
