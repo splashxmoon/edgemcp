@@ -109,7 +109,13 @@ from mcp.server.fastmcp import FastMCP
 import time
 
 # --- MCP Cloud Server ---
-mcp_app = FastMCP("edgedefense_mcp", sse_path="/connect")
+from mcp.server.sse import TransportSecuritySettings
+
+security_settings = TransportSecuritySettings(
+    enable_dns_rebinding_protection=False
+)
+
+mcp_app = FastMCP("edgedefense_mcp", sse_path="/connect", transport_security=security_settings)
 
 @mcp_app.tool()
 async def edgedefense_scan_network(scan_depth: str = "quick", response_format: str = "markdown") -> str:
@@ -150,16 +156,8 @@ async def edgedefense_explain_finding(finding_id: str, response_format: str = "m
 Telnet is an unencrypted, legacy protocol. Credentials and commands are sent in plain text, making them trivial to intercept.
 *Recommendation*: Disable Telnet on the device and use SSH if remote access is required."""
 
-# Mount the MCP server to FastAPI (with a simple auth check)
-@app.middleware("http")
-async def mcp_auth_middleware(request: Request, call_next):
-    if request.url.path.startswith("/mcp/"):
-        auth = request.headers.get("Authorization")
-        if not auth or not auth.startswith("Bearer "):
-            return JSONResponse(status_code=401, content={"detail": "Bearer token required"})
-        # In a real app, verify the token here with Supabase
-    return await call_next(request)
 
+# Mount the MCP server to FastAPI
 app.mount("/mcp", mcp_app.sse_app())
 
 @app.get("/health")
