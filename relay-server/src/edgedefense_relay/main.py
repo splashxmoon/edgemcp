@@ -109,7 +109,7 @@ from mcp.server.fastmcp import FastMCP
 import time
 
 # --- MCP Cloud Server ---
-mcp_app = FastMCP("edgedefense_mcp")
+mcp_app = FastMCP("edgedefense_mcp", sse_path="/connect")
 
 @mcp_app.tool()
 async def edgedefense_scan_network(scan_depth: str = "quick", response_format: str = "markdown") -> str:
