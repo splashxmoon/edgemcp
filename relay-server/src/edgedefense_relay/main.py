@@ -21,15 +21,32 @@ active_uplinks: Dict[str, WebSocket] = {}
 active_sse_queues: Dict[str, asyncio.Queue] = {}
 
 
-# --- Authentication Mock ---
-# For V1, the user's "session token auth" will just map back to a user ID.
-# In a real system, you would validate the Bearer token or session token here.
+import os
+from supabase import create_client, Client
+
+# --- Authentication ---
+# Connect to Supabase to verify the JWT token
 async def get_user_id(token: str) -> str:
     if not token:
         raise HTTPException(status_code=401, detail="Token required")
-    # In a real app, decode JWT or look up in DB. 
-    # For now, we assume the token IS the user_id (e.g., "user_123").
-    return token
+    
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_KEY")
+    
+    if not supabase_url or not supabase_key:
+        logger.warning("SUPABASE_URL or SUPABASE_KEY missing. Falling back to mock auth.")
+        return token
+        
+    try:
+        supabase: Client = create_client(supabase_url, supabase_key)
+        user_response = supabase.auth.get_user(token)
+        
+        if user_response and user_response.user:
+            return user_response.user.id
+    except Exception as e:
+        logger.error(f"Supabase auth failed: {e}")
+        
+    raise HTTPException(status_code=401, detail="Invalid token")
 
 async def get_user_id_from_header(request: Request) -> str:
     auth = request.headers.get("Authorization")

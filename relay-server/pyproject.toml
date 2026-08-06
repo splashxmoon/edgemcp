@@ -10,7 +10,8 @@ dependencies = [
     "pydantic",
     "python-jose[cryptography]",
     "mcp",
-    "sse-starlette"
+    "sse-starlette",
+    "supabase"
 ]
 
 [build-system]
