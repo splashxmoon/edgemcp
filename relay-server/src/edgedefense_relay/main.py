@@ -4,7 +4,12 @@ import logging
 from typing import Dict, Any, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from pydantic import BaseModel
+import time
+import uuid
+import hashlib
+import base64
 from sse_starlette.sse import EventSourceResponse
 
 # Configure logging
@@ -155,6 +160,100 @@ async def mcp_connect_post(token: str, request: Request):
     except Exception as e:
         logger.error(f"Error forwarding to uplink: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+# --- 4. OAuth 2.1 Identity Provider for Claude Desktop ---
+
+# In-memory stores for OAuth flow
+oauth_clients: Dict[str, str] = {}
+oauth_codes: Dict[str, dict] = {}
+
+class ClientRegistration(BaseModel):
+    client_name: Optional[str] = None
+    redirect_uris: list[str] = []
+
+@app.get("/.well-known/oauth-authorization-server")
+async def oauth_metadata():
+    base_url = "https://www.edgedefenseai.com"
+    return {
+        "issuer": base_url,
+        "authorization_endpoint": f"{base_url}/oauth/authorize",
+        "token_endpoint": f"{base_url}/oauth/token",
+        "registration_endpoint": f"{base_url}/oauth/register",
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code"],
+        "code_challenge_methods_supported": ["S256"]
+    }
+
+@app.post("/oauth/register")
+async def oauth_register(reg: ClientRegistration):
+    client_id = str(uuid.uuid4())
+    oauth_clients[client_id] = reg.redirect_uris[0] if reg.redirect_uris else ""
+    return {
+        "client_id": client_id,
+        "client_secret": str(uuid.uuid4()), 
+        "client_id_issued_at": int(time.time()),
+        "redirect_uris": reg.redirect_uris
+    }
+
+@app.get("/oauth/authorize")
+async def oauth_authorize(
+    client_id: str, 
+    redirect_uri: str, 
+    state: str, 
+    code_challenge: str, 
+    code_challenge_method: str = "S256"
+):
+    params = f"?client_id={client_id}&redirect_uri={redirect_uri}&state={state}&code_challenge={code_challenge}"
+    return RedirectResponse(url=f"https://www.edgedefenseai.com/login{params}")
+
+class GenerateCodeReq(BaseModel):
+    token: str
+    code_challenge: str
+    redirect_uri: str
+
+@app.post("/oauth/generate_code")
+async def oauth_generate_code(req: GenerateCodeReq):
+    code = str(uuid.uuid4())
+    oauth_codes[code] = {
+        "token": req.token,
+        "code_challenge": req.code_challenge,
+        "redirect_uri": req.redirect_uri,
+        "expires_at": time.time() + 300 
+    }
+    return {"code": code}
+
+@app.post("/oauth/token")
+async def oauth_token(request: Request):
+    form = await request.form()
+    grant_type = form.get("grant_type")
+    code = form.get("code")
+    code_verifier = form.get("code_verifier")
+
+    if grant_type != "authorization_code":
+        raise HTTPException(status_code=400, detail="unsupported_grant_type")
+    
+    code_data = oauth_codes.get(code)
+    if not code_data:
+        raise HTTPException(status_code=400, detail="invalid_grant")
+    
+    if time.time() > code_data["expires_at"]:
+        del oauth_codes[code]
+        raise HTTPException(status_code=400, detail="invalid_grant expired")
+    
+    digest = hashlib.sha256(code_verifier.encode('ascii')).digest()
+    expected_challenge = base64.urlsafe_b64encode(digest).rstrip(b'=').decode('ascii')
+    
+    if expected_challenge != code_data["code_challenge"]:
+        raise HTTPException(status_code=400, detail="invalid_grant pkce mismatch")
+    
+    token = code_data["token"]
+    del oauth_codes[code] 
+    
+    return {
+        "access_token": token,
+        "token_type": "Bearer",
+        "expires_in": 31536000 
+    }
 
 
 def run():
