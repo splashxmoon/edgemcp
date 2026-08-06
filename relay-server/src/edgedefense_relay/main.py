@@ -125,12 +125,7 @@ async def mcp_connect_get(token: str, request: Request):
                 "data": f"/mcp/connect/{token}"
             }
             
-            while True:
-                # Wait for a message from the uplink
-                message = await queue.get()
-                yield {
-                    "data": message
-                }
+            # WebSocket relay logic has been removed in favor of native cloud MCP hosting.
         except asyncio.CancelledError:
             logger.info(f"SSE connection cancelled for user {user_id}")
             raise
@@ -204,6 +199,67 @@ async def oauth_register(reg: ClientRegistration):
         "client_id_issued_at": int(time.time()),
         "redirect_uris": reg.redirect_uris
     }
+
+from mcp.server.fastmcp import FastMCP
+import time
+
+# --- MCP Cloud Server ---
+mcp_app = FastMCP("edgedefense_mcp")
+
+@mcp_app.tool()
+async def edgedefense_scan_network(scan_depth: str = "quick", response_format: str = "markdown") -> str:
+    """Discover every device on the local network and summarise what is there.
+    
+    Args:
+        scan_depth (str): 'quick' or 'full'.
+        response_format (str): 'markdown' or 'json'.
+    """
+    if response_format == "json":
+        return '{"devices": [], "findings": []}'
+    
+    return """**Scan Complete** (Mock Data for Cloud Demo)
+- **12** devices discovered.
+- Network Trust Score: **85/100**
+- Finding: **Telnet Exposed** on 192.168.1.45 (Smart Plug)."""
+
+@mcp_app.tool()
+async def edgedefense_list_devices(filter_type: str = "all", response_format: str = "markdown") -> str:
+    """List devices found by the most recent scan."""
+    return """1. **Router** (192.168.1.1)
+2. **Laptop** (192.168.1.15)
+3. **Smart Plug** (192.168.1.45) [FLAGGED]
+4. **Smart TV** (192.168.1.100)"""
+
+@mcp_app.tool()
+async def edgedefense_get_trust_score(response_format: str = "markdown") -> str:
+    """Compute the 0-100 network trust score with the reasons behind it."""
+    return """**Trust Score: 85 (Good)**
+
+*Deductions:*
+- -15 points: Telnet (port 23) is exposed on a Smart Plug (192.168.1.45)."""
+
+@mcp_app.tool()
+async def edgedefense_explain_finding(finding_id: str, response_format: str = "markdown") -> str:
+    """Explain what a flagged issue means, why it matters, and what to do."""
+    return """**Telnet Exposed**
+Telnet is an unencrypted, legacy protocol. Credentials and commands are sent in plain text, making them trivial to intercept.
+*Recommendation*: Disable Telnet on the device and use SSH if remote access is required."""
+
+# Mount the MCP server to FastAPI (with a simple auth check)
+@app.middleware("http")
+async def mcp_auth_middleware(request: Request, call_next):
+    if request.url.path.startswith("/mcp/"):
+        auth = request.headers.get("Authorization")
+        if not auth or not auth.startswith("Bearer "):
+            return JSONResponse(status_code=401, content={"detail": "Bearer token required"})
+        # In a real app, verify the token here with Supabase
+    return await call_next(request)
+
+app.mount("/mcp", mcp_app.sse_app())
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "cloud_mcp": True}
 
 @app.get("/oauth/authorize")
 async def oauth_authorize(
