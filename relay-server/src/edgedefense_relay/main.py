@@ -1,101 +1,28 @@
-import asyncio
-import json
-import logging
-from typing import Dict, Any, Optional
-
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends, HTTPException, status
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel
-import time
-import uuid
-import hashlib
-import base64
 from sse_starlette.sse import EventSourceResponse
+import uuid
+import time
+import json
+import asyncio
+from typing import Dict
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+app = FastAPI(title="EdgeDefense Relay Server (Cloud)")
 
-from fastapi.middleware.cors import CORSMiddleware
-
-app = FastAPI(title="EdgeDefense Relay Server")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# In-memory registries
-# Maps user_id -> active WebSocket connection
-active_uplinks: Dict[str, WebSocket] = {}
-
-# Maps user_id -> asyncio.Queue for SSE messages going to Claude
-active_sse_queues: Dict[str, asyncio.Queue] = {}
-
-
-import os
-from supabase import create_client, Client
-
-# --- Authentication ---
-# Connect to Supabase to verify the JWT token
-async def get_user_id(token: str) -> str:
-    if not token:
-        raise HTTPException(status_code=401, detail="Token required")
-    
-    supabase_url = os.getenv("SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_KEY")
-    
-    if not supabase_url or not supabase_key:
-        logger.warning("SUPABASE_URL or SUPABASE_KEY missing. Falling back to mock auth.")
-        return token
-        
-    try:
-        supabase: Client = create_client(supabase_url, supabase_key)
-        user_response = supabase.auth.get_user(token)
-        
-        if user_response and user_response.user:
-            return user_response.user.id
-    except Exception as e:
-        logger.error(f"Supabase auth failed: {e}")
-        
-    raise HTTPException(status_code=401, detail="Invalid token")
-
-async def get_user_id_from_header(request: Request) -> str:
-    auth = request.headers.get("Authorization")
-    if not auth or not auth.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Bearer token required")
-    token = auth.split(" ")[1]
-    return await get_user_id(token)
-
-
-# --- OAuth 2.1 Identity Provider for Claude Desktop ---
-
-# In-memory stores for OAuth flow
+# --- OAuth Mock Logic (Keeping this intact) ---
 oauth_clients: Dict[str, str] = {}
 oauth_codes: Dict[str, dict] = {}
 
-class ClientRegistration(BaseModel):
-    client_name: Optional[str] = None
-    redirect_uris: list[str] = []
+from pydantic import BaseModel
+import hashlib
+import base64
 
-@app.get("/.well-known/oauth-authorization-server")
-async def oauth_metadata():
-    base_url = "https://www.edgedefenseai.com"
-    return {
-        "issuer": base_url,
-        "authorization_endpoint": f"{base_url}/oauth/authorize",
-        "token_endpoint": f"{base_url}/oauth/token",
-        "registration_endpoint": f"{base_url}/oauth/register",
-        "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code"],
-        "code_challenge_methods_supported": ["S256"]
-    }
+class RegisterReq(BaseModel):
+    client_name: str
+    redirect_uris: list[str]
 
 @app.post("/oauth/register")
-async def oauth_register(reg: ClientRegistration):
+async def oauth_register(reg: RegisterReq):
     client_id = str(uuid.uuid4())
     oauth_clients[client_id] = reg.redirect_uris[0] if reg.redirect_uris else ""
     return {
@@ -104,39 +31,6 @@ async def oauth_register(reg: ClientRegistration):
         "client_id_issued_at": int(time.time()),
         "redirect_uris": reg.redirect_uris
     }
-
-from mcp.server.fastmcp import FastMCP
-import time
-
-# --- MCP Cloud Server ---
-from edgedefense_relay.mcp_tools import register_tools
-from mcp.server.sse import TransportSecuritySettings
-
-security_settings = TransportSecuritySettings(
-    enable_dns_rebinding_protection=False
-)
-
-mcp_app = FastMCP(
-    "edgedefense_mcp", 
-    sse_path="/connect", 
-    message_path="/messages",
-    transport_security=security_settings
-)
-
-# Register all 11 fully functional tools
-register_tools(mcp_app)
-
-# Mount the MCP server to FastAPI
-app.mount("/mcp", mcp_app.sse_app())
-
-@app.get("/oauth/debug")
-async def mcp_debug():
-    tools = await mcp_app.list_tools()
-    return {"tools": [t.name for t in tools]}
-
-@app.get("/health")
-async def health_check():
-    return {"status": "ok", "cloud_mcp": True}
 
 @app.get("/oauth/authorize")
 async def oauth_authorize(
@@ -198,10 +92,85 @@ async def oauth_token(request: Request):
         "expires_in": 31536000 
     }
 
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "cloud_mcp": True, "agent_connected": active_agent_ws is not None}
+
+
+# --- Relay Architecture ---
+
+# State
+active_agent_ws: WebSocket = None
+active_sse_queues: Dict[str, asyncio.Queue] = {}
+
+@app.websocket("/ws/agent")
+async def websocket_agent_endpoint(websocket: WebSocket):
+    global active_agent_ws
+    await websocket.accept()
+    active_agent_ws = websocket
+    print("Edge Agent connected to Cloud Relay!")
+    try:
+        while True:
+            data = await websocket.receive_text()
+            # The agent sends responses. We forward them to the SSE queues.
+            # In a multi-client setup, we'd route by session_id.
+            # Here we broadcast to all active SSE connections (usually just Claude Desktop)
+            for q in active_sse_queues.values():
+                await q.put(data)
+    except WebSocketDisconnect:
+        print("Edge Agent disconnected.")
+        active_agent_ws = None
+
+@app.get("/mcp/connect")
+async def mcp_connect(request: Request):
+    """Claude Desktop connects here."""
+    session_id = str(uuid.uuid4())
+    q = asyncio.Queue()
+    active_sse_queues[session_id] = q
+
+    async def event_generator():
+        try:
+            # Send the endpoint URL so Claude knows where to POST messages
+            yield {
+                "event": "endpoint",
+                "data": f"/mcp/messages?session_id={session_id}"
+            }
+            # Read from queue and yield events
+            while True:
+                msg = await q.get()
+                yield {
+                    "event": "message",
+                    "data": msg
+                }
+        except asyncio.CancelledError:
+            pass
+        finally:
+            active_sse_queues.pop(session_id, None)
+
+    return EventSourceResponse(event_generator())
+
+@app.post("/mcp/messages")
+async def mcp_messages(request: Request):
+    """Claude Desktop POSTs JSON-RPC messages here."""
+    session_id = request.query_params.get("session_id")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id required")
+    
+    if not active_agent_ws:
+        raise HTTPException(status_code=503, detail="No Edge Agent connected to Relay")
+        
+    body = await request.body()
+    try:
+        # Forward directly to the Edge Agent over WebSocket
+        await active_agent_ws.send_text(body.decode("utf-8"))
+        return JSONResponse(status_code=202, content="Accepted")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 def run():
     import uvicorn
-    uvicorn.run("edgedefense_relay.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("edgedefense_relay.main:app", host="0.0.0.0", port=8000, reload=False)
 
 if __name__ == "__main__":
     run()
