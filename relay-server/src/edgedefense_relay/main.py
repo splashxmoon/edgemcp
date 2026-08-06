@@ -147,7 +147,7 @@ async def mcp_connect(request: Request):
             # Send the endpoint URL so Claude knows where to POST messages
             yield {
                 "event": "endpoint",
-                "data": f"/mcp/messages?session_id={session_id}"
+                "data": f"https://www.edgedefenseai.com/mcp/messages?session_id={session_id}"
             }
             # Read from queue and yield events
             while True:
