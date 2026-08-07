@@ -1,5 +1,11 @@
-mcp==1.29.0
-websockets
-speedtest-cli
-psutil
-mac-vendor-lookup
+# For the home machine running edge_agent.py.
+#
+# edgedefense_agent.py runs the real, tested MCP server (edgedefense_mcp.server)
+# rather than a separate reimplementation, so what it needs is that package and
+# its engine -- not psutil/mac-vendor-lookup/speedtest-cli, which were
+# dependencies of the fake tools in the old mcp_tools.py, now removed.
+#
+# Install with the repo root as the working directory:
+#   pip install -e ./core-engine -e ./mcp-server -r relay-server/requirements_edge.txt
+-e ../core-engine
+-e ../mcp-server

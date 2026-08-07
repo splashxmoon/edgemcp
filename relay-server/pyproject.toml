@@ -3,15 +3,28 @@ name = "edgedefense-relay"
 version = "0.1.0"
 description = "Central relay server for EdgeDefense MCP"
 requires-python = ">=3.9"
+# This is the cloud half only -- it relays JSON-RPC text between the browser
+# and the home agent and never runs a scan itself, so it stays free of
+# edgedefense-core. websockets and python-jose were dependencies of an earlier
+# transport/auth approach that main.py no longer uses; removed rather than
+# carried forward unused.
+# starlette<1 is load-bearing, not a style preference: starlette 1.0 dropped
+# the on_startup/on_shutdown constructor kwargs that fastapi's own FastAPI()
+# still passes internally as of the versions on PyPI today, so an unpinned
+# install resolves a genuinely broken combination -- FastAPI() raises
+# TypeError before a single route is registered. Confirmed by installing this
+# file's dependencies into a clean venv.
 dependencies = [
     "fastapi",
     "uvicorn",
-    "websockets",
     "pydantic",
-    "python-jose[cryptography]",
     "sse-starlette",
-    "python-multipart"
+    "python-multipart",
+    "starlette<1"
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "httpx"]
 
 [build-system]
 requires = ["hatchling"]
@@ -19,3 +32,6 @@ build-backend = "hatchling.build"
 
 [project.scripts]
 edgedefense-relay = "edgedefense_relay.main:run"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
