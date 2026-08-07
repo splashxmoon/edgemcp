@@ -43,6 +43,7 @@ async def run_http_bridge():
                 data = await asyncio.to_thread(_poll)
                 if data and data.get("message"):
                     msg = data["message"]
+                    print(f"[Relay -> Local] {msg}")
                     proc.stdin.write(msg.encode('utf-8') + b'\n')
                     await proc.stdin.drain()
             except urllib.error.URLError as e:
@@ -50,6 +51,7 @@ async def run_http_bridge():
                 if not isinstance(e.reason, TimeoutError) and "timeout" not in str(e).lower():
                     await asyncio.sleep(2)
             except Exception as e:
+                print(f"Poll error: {e}")
                 await asyncio.sleep(2)
                 
     async def proc_to_send():
@@ -59,6 +61,7 @@ async def run_http_bridge():
                 if not line:
                     break
                 
+                print(f"[Local -> Relay] {line.decode('utf-8').strip()}")
                 # Send back to relay
                 def _send(data):
                     req = urllib.request.Request(send_url, data=data, method="POST", headers={"Content-Type": "application/json"})

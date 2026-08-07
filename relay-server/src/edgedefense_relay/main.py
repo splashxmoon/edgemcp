@@ -147,43 +147,61 @@ async def relay_send(request: Request):
 async def mcp_connect(request: Request):
     """Claude Desktop connects here."""
     session_id = str(uuid.uuid4())
+    log_debug(f"GET /mcp/connect -> new session_id={session_id}")
     q = asyncio.Queue()
     active_sse_queues[session_id] = q
 
     async def event_generator():
         try:
             # Send the endpoint URL so Claude knows where to POST messages
+            endpoint_url = f"https://www.edgedefenseai.com/mcp/messages?session_id={session_id}"
+            log_debug(f"Yielding endpoint: {endpoint_url}")
             yield {
                 "event": "endpoint",
-                "data": f"https://www.edgedefenseai.com/mcp/messages?session_id={session_id}"
+                "data": endpoint_url
             }
             # Read from queue and yield events
             while True:
                 msg = await q.get()
+                log_debug(f"Yielding message to {session_id}: {msg}")
                 yield {
                     "event": "message",
                     "data": msg
                 }
         except asyncio.CancelledError:
-            pass
+            log_debug(f"SSE Cancelled: {session_id}")
         finally:
             active_sse_queues.pop(session_id, None)
 
     return EventSourceResponse(event_generator())
 
+debug_logs = []
+def log_debug(msg: str):
+    debug_logs.append(msg)
+    if len(debug_logs) > 100:
+        debug_logs.pop(0)
+
+@app.get("/mcp/debug_logs")
+async def get_debug_logs():
+    return {"logs": debug_logs}
+
 @app.post("/mcp/messages")
 async def mcp_messages(request: Request):
     """Claude Desktop POSTs JSON-RPC messages here."""
     session_id = request.query_params.get("session_id")
+    log_debug(f"POST /mcp/messages session_id={session_id}")
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id required")
         
     body = await request.body()
     try:
+        msg = body.decode("utf-8")
+        log_debug(f"Message body: {msg}")
         # Queue the message for the Edge Agent to pick up
-        await active_agent_queue.put(body.decode("utf-8"))
+        await active_agent_queue.put(msg)
         return JSONResponse(status_code=202, content="Accepted")
     except Exception as e:
+        log_debug(f"Message error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
