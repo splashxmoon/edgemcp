@@ -14,10 +14,17 @@ leave open: even /relay/send, which only carries responses *back* toward
 Claude, would let anyone who found the URL inject fabricated scan results
 into a real session.
 
-EDGEDEFENSE_RELAY_TOKEN must be set before this will serve authenticated
-traffic. Without it, the protected endpoints answer 503 rather than silently
-accepting every request -- a missing token must never be indistinguishable
-from an intentionally open server.
+Three environment variables must be set before this serves anything real:
+
+* EDGEDEFENSE_RELAY_TOKEN -- the bearer credential every protected request
+  must present. Also goes on the home agent.
+* EDGEDEFENSE_LOGIN_EMAIL / EDGEDEFENSE_LOGIN_PASSWORD -- what a human types
+  into the login page to obtain that token in the first place. Deliberately a
+  separate credential (see the comment on LOGIN_EMAIL below).
+
+Without all three, the protected endpoints answer 503 rather than silently
+accepting every request -- missing configuration must never be
+indistinguishable from an intentionally open server.
 """
 
 from __future__ import annotations
@@ -53,10 +60,21 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="EdgeDefense Relay Server (Cloud)", lifespan=lifespan)
 
-#: The one secret this whole deployment turns on. Same value goes on the home
-#: agent (EDGEDEFENSE_RELAY_TOKEN) and is what a visitor must type into the
-#: login page to get a working connector.
+#: The credential Claude actually uses on every request, as a bearer token.
+#: Same value goes on the home agent as EDGEDEFENSE_RELAY_TOKEN. This is
+#: never typed by a human -- the login flow below hands it out after checking
+#: a *separate* credential, so the value that goes in a browser form is not
+#: the same value that ends up authenticating every API call.
 RELAY_TOKEN: Optional[str] = os.environ.get("EDGEDEFENSE_RELAY_TOKEN")
+
+#: What a human actually types into the login page. Deliberately distinct
+#: from RELAY_TOKEN: if a browser extension, a shoulder-surfer, or a copied
+#: URL ever exposed this pair, RELAY_TOKEN -- the credential every request
+#: relies on -- would still be safe, and rotating the login credential alone
+#: (without touching the home agent's configuration) is enough to lock
+#: someone back out.
+LOGIN_EMAIL: Optional[str] = os.environ.get("EDGEDEFENSE_LOGIN_EMAIL")
+LOGIN_PASSWORD: Optional[str] = os.environ.get("EDGEDEFENSE_LOGIN_PASSWORD")
 
 
 def require_relay_token(authorization: Optional[str] = Header(None)) -> None:
@@ -123,18 +141,32 @@ class GenerateCodeReq(BaseModel):
     #: anonymous session and echo it straight back as an access_token, which
     #: authenticated nothing: anyone could self-issue a session with zero
     #: credentials. Now the code is only ever minted for RELAY_TOKEN itself,
-    #: and only after the passphrase is checked against it here.
-    passphrase: str
+    #: and only after these credentials are checked against LOGIN_EMAIL /
+    #: LOGIN_PASSWORD here -- a single owner account, not a user directory.
+    email: str
+    password: str
     code_challenge: str
     redirect_uri: str
 
 
+def _credentials_match(email: str, password: str) -> bool:
+    """Constant-time check against the one configured login.
+
+    Both fields are checked even when the email is already wrong, rather than
+    short-circuiting on the first mismatch -- returning "wrong password"
+    faster than "wrong email" would leak which one was correct.
+    """
+    email_ok = hmac.compare_digest(email.strip().lower(), (LOGIN_EMAIL or "").strip().lower())
+    password_ok = hmac.compare_digest(password, LOGIN_PASSWORD or "")
+    return email_ok and password_ok
+
+
 @app.post("/oauth/generate_code")
 async def oauth_generate_code(req: GenerateCodeReq):
-    if not RELAY_TOKEN:
+    if not RELAY_TOKEN or not LOGIN_EMAIL or not LOGIN_PASSWORD:
         raise HTTPException(status_code=503, detail="Relay is not configured.")
-    if not hmac.compare_digest(req.passphrase, RELAY_TOKEN):
-        raise HTTPException(status_code=401, detail="Incorrect passphrase.")
+    if not _credentials_match(req.email, req.password):
+        raise HTTPException(status_code=401, detail="Incorrect email or password.")
 
     code = str(uuid.uuid4())
     oauth_codes[code] = {
