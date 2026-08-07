@@ -74,10 +74,17 @@ async def oauth_metadata():
 
 @app.post("/oauth/token")
 async def oauth_token(request: Request):
-    form = await request.form()
-    grant_type = form.get("grant_type")
-    code = form.get("code")
-    code_verifier = form.get("code_verifier")
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        data = await request.json()
+        grant_type = data.get("grant_type")
+        code = data.get("code")
+        code_verifier = data.get("code_verifier")
+    else:
+        form = await request.form()
+        grant_type = form.get("grant_type")
+        code = form.get("code")
+        code_verifier = form.get("code_verifier")
 
     if grant_type != "authorization_code":
         raise HTTPException(status_code=400, detail="unsupported_grant_type")
@@ -102,7 +109,8 @@ async def oauth_token(request: Request):
     return {
         "access_token": token,
         "token_type": "Bearer",
-        "expires_in": 31536000 
+        "expires_in": 31536000,
+        "refresh_token": token
     }
 
 @app.get("/health")
