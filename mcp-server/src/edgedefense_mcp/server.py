@@ -1236,6 +1236,101 @@ async def edgedefense_speed_test(
 
 
 # --------------------------------------------------------------------------
+# Prompts
+#
+# These are what a client renders as slash commands (Claude Desktop and
+# claude.ai show them as "/scan_network" etc. in the composer). Each one is a
+# single natural-language instruction, not a tool call -- the model still
+# decides which tools to run and how to present the result, using the
+# tool docstrings above for guidance. Kept to the handful of intents a user
+# actually reaches for by name; everything else is still reachable by asking
+# in plain English; a prompt per tool would just be a slower way to type the
+# tool's name.
+# --------------------------------------------------------------------------
+
+
+@mcp.prompt(title="Scan my network")
+def scan_network() -> str:
+    """Run a fresh scan and summarise what's on the network."""
+    return (
+        "Scan my home network and tell me what's connected. Call "
+        "edgedefense_scan_network, then summarise: how many devices, what kinds, "
+        "the trust score and why, and anything worth my attention. Keep it "
+        "conversational, not a raw dump of every field."
+    )
+
+
+@mcp.prompt(title="What's changed since last time")
+def whats_changed() -> str:
+    """Compare the latest scan against the previous one."""
+    return (
+        "What's changed on my network since the last scan? Call "
+        "edgedefense_whats_changed and walk me through new devices, anything "
+        "that vanished, and any port changes -- and say plainly if a vanished "
+        "device is probably just asleep versus actually gone."
+    )
+
+
+@mcp.prompt(title="Explain my trust score")
+def trust_score() -> str:
+    """Get the 0-100 score with the reasoning behind it."""
+    return (
+        "What's my network trust score, and specifically why is it what it is? "
+        "Call edgedefense_get_trust_score, then for each deduction explain what "
+        "it means in plain terms and, if there's an obvious fix, what I'd do "
+        "about it."
+    )
+
+
+@mcp.prompt(title="Look up a device")
+def device_lookup(
+    device: Annotated[str, Field(description="IP, MAC, hostname, or device_id to look up")],
+) -> str:
+    """Full detail on one device, by IP, MAC, hostname, or device_id."""
+    return (
+        f"Tell me everything you know about the device at '{device}'. Call "
+        "edgedefense_get_device_detail with that identifier. If nothing matches, "
+        "run edgedefense_scan_network first in case it just hasn't been seen yet, "
+        "then try again."
+    )
+
+
+@mcp.prompt(title="Why is my network slow?")
+def why_slow() -> str:
+    """Diagnose slowness: Wi-Fi signal, channel congestion, latency, DNS."""
+    return (
+        "My network feels slow -- help me figure out why before jumping to a "
+        "speed test. Call edgedefense_network_stats and edgedefense_latency_check, "
+        "then tell me in plain terms whether this looks like a weak or crowded "
+        "Wi-Fi signal, high latency to the router, or slow DNS -- each has a "
+        "different fix, so be specific about which one the numbers point to. "
+        "Only suggest a full edgedefense_speed_test if none of that explains it."
+    )
+
+
+@mcp.prompt(title="Test my internet speed")
+def speed_test() -> str:
+    """Measure real download/upload throughput and bufferbloat."""
+    return (
+        "Run an internet speed test and tell me what I'm actually getting, "
+        "including upload and any bufferbloat. Call edgedefense_speed_test and "
+        "remind me first that this is the one check that contacts an outside "
+        "server, in case I'd rather not run it on a capped connection."
+    )
+
+
+@mcp.prompt(title="Check this computer's security")
+def security_check() -> str:
+    """Check Wi-Fi encryption, DNS, and exposed local ports on this machine."""
+    return (
+        "Check this computer's own security posture -- Wi-Fi encryption, DNS "
+        "configuration, and any ports it has open to the local network. Call "
+        "edgedefense_local_security and flag anything that shouldn't normally "
+        "be exposed."
+    )
+
+
+# --------------------------------------------------------------------------
 # Resources
 # --------------------------------------------------------------------------
 

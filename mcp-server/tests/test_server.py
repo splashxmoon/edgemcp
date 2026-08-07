@@ -494,3 +494,48 @@ def test_instructions_describe_the_server():
     instructions = _init_options().instructions or ""
     assert len(instructions) > 200
     assert "network" in instructions.lower()
+
+
+# --------------------------------------------------------------------------
+# Prompts (slash commands)
+# --------------------------------------------------------------------------
+
+
+def test_seven_prompts_are_registered_with_titles():
+    prompts = run(srv.mcp.list_prompts())
+    names = {p.name for p in prompts}
+    assert names == {
+        "scan_network",
+        "whats_changed",
+        "trust_score",
+        "device_lookup",
+        "why_slow",
+        "speed_test",
+        "security_check",
+    }
+    for prompt in prompts:
+        assert prompt.title, prompt.name
+
+
+def test_device_lookup_prompt_requires_its_argument():
+    prompts = run(srv.mcp.list_prompts())
+    device_lookup = next(p for p in prompts if p.name == "device_lookup")
+    assert len(device_lookup.arguments) == 1
+    assert device_lookup.arguments[0].required is True
+
+
+def test_device_lookup_prompt_interpolates_the_identifier():
+    result = run(srv.mcp.get_prompt("device_lookup", {"device": "192.168.1.40"}))
+    text = result.messages[0].content.text
+    assert "192.168.1.40" in text
+    assert "edgedefense_get_device_detail" in text
+
+
+def test_prompt_bodies_name_a_real_tool():
+    """Every prompt must point at a tool that actually exists, by name."""
+    tool_names = {t.name for t in run(srv.mcp.list_tools())}
+    for prompt in run(srv.mcp.list_prompts()):
+        args = {a.name: "x" for a in (prompt.arguments or [])}
+        rendered = run(srv.mcp.get_prompt(prompt.name, args))
+        text = rendered.messages[0].content.text
+        assert any(tool in text for tool in tool_names), prompt.name
