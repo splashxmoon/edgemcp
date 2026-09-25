@@ -27,6 +27,7 @@ def client(monkeypatch):
     monkeypatch.setenv("EDGEDEFENSE_RELAY_TOKEN", TOKEN)
     monkeypatch.setenv("EDGEDEFENSE_LOGIN_EMAIL", EMAIL)
     monkeypatch.setenv("EDGEDEFENSE_LOGIN_PASSWORD", PASSWORD)
+    monkeypatch.setenv("EDGEDEFENSE_QUEUE_TIMEOUT", "1")
 
     import importlib
 

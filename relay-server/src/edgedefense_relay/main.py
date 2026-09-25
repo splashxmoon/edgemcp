@@ -44,6 +44,11 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+#: How long /relay/poll waits for a message before returning an empty
+#: response. Set to a short value in tests to keep the suite fast;
+#: production should keep a generous window (default 30s).
+QUEUE_TIMEOUT = float(os.environ.get("EDGEDEFENSE_QUEUE_TIMEOUT", "30"))
+
 #: Constructed once uvicorn's event loop is actually running. asyncio.Queue no
 #: longer strictly needs a running loop to build on modern Python, but binding
 #: it inside the app's own lifespan is the version-independent way to get that
@@ -251,7 +256,7 @@ async def health_check():
 async def relay_poll():
     """The home agent long-polls this to receive commands from Claude."""
     try:
-        msg = await asyncio.wait_for(active_agent_queue.get(), timeout=30.0)
+        msg = await asyncio.wait_for(active_agent_queue.get(), timeout=QUEUE_TIMEOUT)
         return JSONResponse(status_code=200, content={"message": msg})
     except asyncio.TimeoutError:
         return JSONResponse(status_code=200, content={"message": None})
