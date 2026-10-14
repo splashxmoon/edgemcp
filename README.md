@@ -178,6 +178,26 @@ the tracked branch, and when new commits land it fast-forwards and restarts
 and every URL anyone has saved — survives the update. Push to `main`, and within
 five minutes the remote server is serving the new code at the same link.
 
+**With Google sign-in** (no passphrase required):
+
+```bash
+export EDGEDEFENSE_GOOGLE_CLIENT_ID='...apps.googleusercontent.com'
+export EDGEDEFENSE_GOOGLE_CLIENT_SECRET='...'
+python scripts/serve_forever.py --hostname mcp.edgedefenseai.com --tunnel edgedefense-mcp \
+  --oauth --no-passphrase \
+  --allow-email user@example.com --allow-email another@example.com
+```
+
+Or pass the Google credentials as arguments instead of environment variables:
+
+```bash
+python scripts/serve_forever.py --hostname mcp.edgedefenseai.com --tunnel edgedefense-mcp \
+  --oauth --no-passphrase \
+  --google-client-id '...apps.googleusercontent.com' \
+  --google-client-secret '...' \
+  --allow-email user@example.com
+```
+
 A few deliberate choices:
 
 - **`--ff-only`.** A supervisor that silently creates merge commits on an
@@ -284,15 +304,20 @@ metadata and the redirect back to your client are built from it.
 Rather than sharing one passphrase, you can sign in with Google and allow
 specific addresses.
 
-Create an OAuth client in the Google Cloud Console (APIs & Services →
-Credentials → Create credentials → OAuth client ID → Web application), and add
-this exact redirect URI:
+**Step 1: Create a Google OAuth client**
 
-```
-https://mcp.edgedefenseai.com/auth/google/callback
-```
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Select or create a project
+3. Navigate to APIs & Services → Credentials
+4. Click "Create credentials" → "OAuth client ID"
+5. Application type: **Web application**
+6. Add this exact redirect URI (replace the domain with yours):
+   ```
+   https://mcp.edgedefenseai.com/auth/google/callback
+   ```
+7. Click "Create" and copy the Client ID and Client Secret
 
-Then:
+**Step 2: Start the server with Google sign-in**
 
 ```bash
 export EDGEDEFENSE_GOOGLE_CLIENT_ID='...apps.googleusercontent.com'
@@ -303,10 +328,22 @@ edgedefense-mcp --http --oauth \
   --no-passphrase
 ```
 
-`--allow-email` is required and repeatable. Signing in with Google proves who
-someone is; it does not decide whether they may read your network, and without
-an allowlist any Google account would satisfy the check. Omit `--no-passphrase`
-to offer both methods on the sign-in page.
+Or use `serve_forever.py` for a permanent setup:
+
+```bash
+export EDGEDEFENSE_GOOGLE_CLIENT_ID='...apps.googleusercontent.com'
+export EDGEDEFENSE_GOOGLE_CLIENT_SECRET='...'
+python scripts/serve_forever.py --hostname mcp.edgedefenseai.com --tunnel edgedefense-mcp \
+  --oauth --no-passphrase \
+  --allow-email you@gmail.com
+```
+
+**Important notes:**
+
+- `--allow-email` is required and repeatable. Without it, any Google account could connect.
+- Signing in with Google proves *who* someone is; it does not decide *whether* they may read your network.
+- Omit `--no-passphrase` to offer both passphrase and Google sign-in on the same page.
+- The redirect URI in Google Cloud Console must match exactly (including https and the full path).
 
 > **One honest caveat.** With Google sign-in enabled, this server contacts
 > Google while somebody is signing in — that is unavoidable for any identity

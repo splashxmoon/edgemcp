@@ -153,7 +153,10 @@ def wait_for_health(port: int, timeout: float = 40.0) -> bool:
 
 
 def start_server(port: int, token: str, hostname: Optional[str] = None,
-                 oauth: bool = False) -> subprocess.Popen:
+                 oauth: bool = False, google_client_id: Optional[str] = None,
+                 google_client_secret: Optional[str] = None,
+                 allow_emails: Optional[list[str]] = None,
+                 no_passphrase: bool = False) -> subprocess.Popen:
     """Launch the MCP server.
 
     ``--json-response`` is not optional behind a tunnel and a serverless proxy:
@@ -167,7 +170,17 @@ def start_server(port: int, token: str, hostname: Optional[str] = None,
     env = dict(os.environ)
     if oauth:
         command.extend(["--oauth", "--public-url", f"https://{hostname}"])
-        env["EDGEDEFENSE_PASSPHRASE"] = token
+        if google_client_id:
+            env["EDGEDEFENSE_GOOGLE_CLIENT_ID"] = google_client_id
+        if google_client_secret:
+            env["EDGEDEFENSE_GOOGLE_CLIENT_SECRET"] = google_client_secret
+        if allow_emails:
+            for email in allow_emails:
+                command.extend(["--allow-email", email])
+        if no_passphrase:
+            command.append("--no-passphrase")
+        else:
+            env["EDGEDEFENSE_PASSPHRASE"] = token
     else:
         env["EDGEDEFENSE_TOKEN"] = token
     with open(SERVER_LOG, "a", encoding="utf-8") as handle:
@@ -291,6 +304,27 @@ def main() -> int:
         "--oauth", action="store_true",
         help="browser sign-in at /mcp; requires a named tunnel and hostname",
     )
+    parser.add_argument(
+        "--google-client-id",
+        default=os.environ.get("EDGEDEFENSE_GOOGLE_CLIENT_ID"),
+        help="Google OAuth client ID for Google sign-in",
+    )
+    parser.add_argument(
+        "--google-client-secret",
+        default=os.environ.get("EDGEDEFENSE_GOOGLE_CLIENT_SECRET"),
+        help="Google OAuth client secret for Google sign-in",
+    )
+    parser.add_argument(
+        "--allow-email",
+        action="append",
+        default=[],
+        help="Email address allowed to sign in with Google (repeatable)",
+    )
+    parser.add_argument(
+        "--no-passphrase",
+        action="store_true",
+        help="Disable passphrase form when using Google sign-in",
+    )
     parser.add_argument("--branch", default="main", help="branch to track (default main)")
     parser.add_argument(
         "--site-repo",
@@ -316,6 +350,12 @@ def main() -> int:
         parser.error("--oauth requires --hostname and --tunnel")
     if args.hostname and not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", args.hostname):
         parser.error("--hostname must be a DNS hostname, without a scheme, port or path")
+    if (args.google_client_id or args.google_client_secret or args.allow_email) and not args.oauth:
+        parser.error("Google sign-in options require --oauth")
+    if args.no_passphrase and not args.oauth:
+        parser.error("--no-passphrase requires --oauth")
+    if (args.google_client_id or args.google_client_secret) and not args.allow_email:
+        parser.error("Google sign-in requires at least one --allow-email")
 
     cloudflared = find_cloudflared()
     if not cloudflared:
@@ -327,7 +367,13 @@ def main() -> int:
     else:
         token = load_or_create_token()
 
-    server = start_server(args.port, token, args.hostname, args.oauth)
+    server = start_server(
+        args.port, token, args.hostname, args.oauth,
+        google_client_id=args.google_client_id,
+        google_client_secret=args.google_client_secret,
+        allow_emails=args.allow_email,
+        no_passphrase=args.no_passphrase,
+    )
     if not wait_for_health(args.port):
         print("Server did not come up. Is the port already in use?", file=sys.stderr)
         stop(server)
@@ -362,7 +408,9 @@ def main() -> int:
     print()
     if args.oauth:
         print("  Connect using browser sign-in. Leave client OAuth fields empty.")
-        if not os.environ.get("EDGEDEFENSE_PASSPHRASE"):
+        if args.allow_emails:
+            print(f"  Google sign-in enabled for {len(args.allow_emails)} email(s)")
+        if not args.no_passphrase and not os.environ.get("EDGEDEFENSE_PASSPHRASE"):
             print(f"  Sign-in passphrase is stored locally in: {PASSPHRASE_FILE}")
     else:
         print("  Treat the URL as a password: it grants a full inventory of this network.")
@@ -396,7 +444,13 @@ def main() -> int:
 
             if server.poll() is not None:
                 log("Server exited; restarting it.")
-                server = start_server(args.port, token, args.hostname, args.oauth)
+                server = start_server(
+                    args.port, token, args.hostname, args.oauth,
+                    google_client_id=args.google_client_id,
+                    google_client_secret=args.google_client_secret,
+                    allow_emails=args.allow_email,
+                    no_passphrase=args.no_passphrase,
+                )
                 wait_for_health(args.port)
 
             if args.check_every and time.time() - last_check >= args.check_every:
@@ -406,7 +460,13 @@ def main() -> int:
                     # public address -- and every saved connector URL -- survives.
                     log("Restarting server to pick up new code (tunnel untouched).")
                     stop(server)
-                    server = start_server(args.port, token, args.hostname, args.oauth)
+                    server = start_server(
+                        args.port, token, args.hostname, args.oauth,
+                        google_client_id=args.google_client_id,
+                        google_client_secret=args.google_client_secret,
+                        allow_emails=args.allow_email,
+                        no_passphrase=args.no_passphrase,
+                    )
                     if wait_for_health(args.port):
                         log("Back up. Same URL, new code.")
                     else:
