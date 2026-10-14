@@ -12,14 +12,14 @@ endpoint other people rely on:
 * **A quick tunnel's hostname is random.** Even a clean restart changes it.
 
 Both are fixed here. The tunnel is started once and deliberately left alone;
-only the server is restarted when new code lands. With ``--hostname`` the
-tunnel is a *named* one, whose address never changes at all -- at which point
+only the server is restarted when new code lands. With ``--hostname`` and
+``--tunnel`` the tunnel is a *named* one, whose address never changes -- at which point
 the public URL is genuinely permanent and nothing downstream needs updating,
 ever.
 
 Typical use, after the one-time named-tunnel setup described in the README:
 
-    python scripts/serve_forever.py --hostname mcp-tunnel.example.com
+    python scripts/serve_forever.py --hostname mcp.edgedefenseai.com --tunnel edgedefense-mcp --oauth
 
 Without ``--hostname`` it falls back to a quick tunnel, prints the address, and
 warns that the address will change if the tunnel is ever restarted.
@@ -42,7 +42,9 @@ from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TOKEN_FILE = REPO_ROOT / ".edgedefense-token"
+PASSPHRASE_FILE = REPO_ROOT / ".edgedefense-passphrase"
 TUNNEL_LOG = REPO_ROOT / ".cloudflared-tunnel.log"
+SERVER_LOG = REPO_ROOT / ".edgedefense-server.log"
 URL_FILE = REPO_ROOT / ".edgedefense-public-url"
 TUNNEL_URL_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
 
@@ -66,18 +68,19 @@ def find_cloudflared() -> Optional[str]:
     return None
 
 
-def load_or_create_token() -> str:
+def load_or_create_token(path: Optional[Path] = None) -> str:
     """Reuse the saved token so the URL survives restarts."""
     import secrets
 
-    if TOKEN_FILE.exists():
-        token = TOKEN_FILE.read_text(encoding="utf-8").strip()
+    path = path or TOKEN_FILE
+    if path.exists():
+        token = path.read_text(encoding="utf-8").strip()
         if token:
             return token
     token = secrets.token_urlsafe(32)
-    TOKEN_FILE.write_text(token, encoding="utf-8")
+    path.write_text(token, encoding="utf-8")
     try:
-        os.chmod(TOKEN_FILE, 0o600)
+        os.chmod(path, 0o600)
     except OSError:
         pass
     return token
@@ -141,35 +144,40 @@ def wait_for_health(port: int, timeout: float = 40.0) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=2):
-                return True
-        except urllib.error.HTTPError:
-            return True  # answering at all is enough
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=2) as response:
+                if response.status == 200:
+                    return True
         except Exception:
             time.sleep(0.5)
     return False
 
 
-def start_server(port: int, token: str) -> subprocess.Popen:
+def start_server(port: int, token: str, hostname: Optional[str] = None,
+                 oauth: bool = False) -> subprocess.Popen:
     """Launch the MCP server.
 
     ``--json-response`` is not optional behind a tunnel and a serverless proxy:
     streamed responses get buffered somewhere in that chain, and stateful
     sessions break when two requests land on different proxy instances.
     """
-    return subprocess.Popen(
-        [
-            sys.executable, "-m", "edgedefense_mcp", "--http",
-            "--port", str(port), "--allow-host", "*", "--json-response",
-        ],
-        cwd=REPO_ROOT,
-        env={**os.environ, "EDGEDEFENSE_TOKEN": token},
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    command = [
+        sys.executable, "-m", "edgedefense_mcp", "--http",
+        "--port", str(port), "--allow-host", hostname or "*", "--json-response",
+    ]
+    env = dict(os.environ)
+    if oauth:
+        command.extend(["--oauth", "--public-url", f"https://{hostname}"])
+        env["EDGEDEFENSE_PASSPHRASE"] = token
+    else:
+        env["EDGEDEFENSE_TOKEN"] = token
+    with open(SERVER_LOG, "a", encoding="utf-8") as handle:
+        return subprocess.Popen(
+            command, cwd=REPO_ROOT, env=env,
+            stdout=subprocess.DEVNULL, stderr=handle,
+        )
 
 
-def start_tunnel(cloudflared: str, port: int, hostname: Optional[str]) -> subprocess.Popen:
+def start_tunnel(cloudflared: str, port: int, tunnel: Optional[str]) -> subprocess.Popen:
     """Launch cloudflared, named if a hostname was configured.
 
     cloudflared logs continuously, so its output goes to a file rather than a
@@ -177,13 +185,13 @@ def start_tunnel(cloudflared: str, port: int, hostname: Optional[str]) -> subpro
     unread eventually fills the OS buffer, at which point cloudflared blocks on
     write and quietly stops serving while still looking alive.
     """
-    if hostname:
-        args = [cloudflared, "tunnel", "run", "--url", f"http://127.0.0.1:{port}", hostname]
+    if tunnel:
+        args = [cloudflared, "tunnel", "run", "--url", f"http://127.0.0.1:{port}", tunnel]
     else:
         args = [cloudflared, "tunnel", "--url", f"http://127.0.0.1:{port}", "--no-autoupdate"]
 
-    handle = open(TUNNEL_LOG, "w", encoding="utf-8")
-    return subprocess.Popen(args, stdout=handle, stderr=subprocess.STDOUT, cwd=REPO_ROOT)
+    with open(TUNNEL_LOG, "w", encoding="utf-8") as handle:
+        return subprocess.Popen(args, stdout=handle, stderr=subprocess.STDOUT, cwd=REPO_ROOT)
 
 
 def read_quick_tunnel_url(process: subprocess.Popen, timeout: float = 60.0) -> Optional[str]:
@@ -271,9 +279,17 @@ def main() -> int:
         "--hostname",
         default=os.environ.get("EDGEDEFENSE_TUNNEL_HOSTNAME"),
         help=(
-            "Named-tunnel hostname, e.g. mcp-tunnel.example.com. Without this a "
+            "Public hostname, e.g. mcp.edgedefenseai.com. Without this a "
             "quick tunnel is used, whose address changes on every restart."
         ),
+    )
+    parser.add_argument(
+        "--tunnel", default=os.environ.get("EDGEDEFENSE_TUNNEL_ID"),
+        help="Cloudflare tunnel name or UUID (separate from the public hostname)",
+    )
+    parser.add_argument(
+        "--oauth", action="store_true",
+        help="browser sign-in at /mcp; requires a named tunnel and hostname",
     )
     parser.add_argument("--branch", default="main", help="branch to track (default main)")
     parser.add_argument(
@@ -294,21 +310,31 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if bool(args.hostname) != bool(args.tunnel):
+        parser.error("--hostname and --tunnel must be supplied together")
+    if args.oauth and not args.hostname:
+        parser.error("--oauth requires --hostname and --tunnel")
+    if args.hostname and not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", args.hostname):
+        parser.error("--hostname must be a DNS hostname, without a scheme, port or path")
+
     cloudflared = find_cloudflared()
     if not cloudflared:
         print("cloudflared was not found. Install it and try again.", file=sys.stderr)
         return 1
 
-    token = load_or_create_token()
+    if args.oauth:
+        token = os.environ.get("EDGEDEFENSE_PASSPHRASE") or load_or_create_token(PASSPHRASE_FILE)
+    else:
+        token = load_or_create_token()
 
-    server = start_server(args.port, token)
+    server = start_server(args.port, token, args.hostname, args.oauth)
     if not wait_for_health(args.port):
         print("Server did not come up. Is the port already in use?", file=sys.stderr)
         stop(server)
         return 1
     log(f"Server up on 127.0.0.1:{args.port} at {current_commit()[:8]}")
 
-    tunnel = start_tunnel(cloudflared, args.port, args.hostname)
+    tunnel = start_tunnel(cloudflared, args.port, args.tunnel)
 
     if args.hostname:
         public = f"https://{args.hostname}"
@@ -324,7 +350,7 @@ def main() -> int:
         log("This address CHANGES if the tunnel restarts. Use --hostname for a "
             "permanent one.")
 
-    url = f"{public}/t/{token}/mcp"
+    url = f"{public}/mcp" if args.oauth else f"{public}/t/{token}/mcp"
     URL_FILE.write_text(url, encoding="utf-8")
 
     site_repo = Path(args.site_repo).expanduser() if args.site_repo else None
@@ -334,7 +360,12 @@ def main() -> int:
     print(f"  Upstream origin (set EDGEDEFENSE_UPSTREAM to this): {public}")
     print(f"  Direct MCP URL:                                     {url}")
     print()
-    print("  Treat the URL as a password: it grants a full inventory of this network.")
+    if args.oauth:
+        print("  Connect using browser sign-in. Leave client OAuth fields empty.")
+        if not os.environ.get("EDGEDEFENSE_PASSPHRASE"):
+            print(f"  Sign-in passphrase is stored locally in: {PASSPHRASE_FILE}")
+    else:
+        print("  Treat the URL as a password: it grants a full inventory of this network.")
     print("  Ctrl+C to stop.")
     print()
 
@@ -348,7 +379,7 @@ def main() -> int:
             # everything downstream is pointing at.
             if tunnel.poll() is not None:
                 log("Tunnel exited; restarting it.")
-                tunnel = start_tunnel(cloudflared, args.port, args.hostname)
+                tunnel = start_tunnel(cloudflared, args.port, args.tunnel)
                 if not args.hostname:
                     fresh = read_quick_tunnel_url(tunnel)
                     if fresh and fresh != public:
@@ -365,7 +396,7 @@ def main() -> int:
 
             if server.poll() is not None:
                 log("Server exited; restarting it.")
-                server = start_server(args.port, token)
+                server = start_server(args.port, token, args.hostname, args.oauth)
                 wait_for_health(args.port)
 
             if args.check_every and time.time() - last_check >= args.check_every:
@@ -375,7 +406,7 @@ def main() -> int:
                     # public address -- and every saved connector URL -- survives.
                     log("Restarting server to pick up new code (tunnel untouched).")
                     stop(server)
-                    server = start_server(args.port, token)
+                    server = start_server(args.port, token, args.hostname, args.oauth)
                     if wait_for_health(args.port):
                         log("Back up. Same URL, new code.")
                     else:

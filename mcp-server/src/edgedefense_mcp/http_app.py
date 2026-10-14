@@ -37,6 +37,36 @@ MCP_PATH = "/mcp"
 TOKEN_PATH_PREFIX = "/t/"
 
 
+class MCPResponseFramingMiddleware:
+    """Let the HTTP server frame MCP bodies, including authentication errors.
+
+    Some intermediaries force chunked transfer for MCP routes. Omitting a
+    fixed Content-Length makes the ASGI server produce actual chunk framing,
+    avoiding a chunked header paired with an unencoded JSON body. OAuth and
+    health responses keep their ordinary framing; HTTP/2 framing is handled
+    by the serving stack without emitting a Transfer-Encoding header here.
+    """
+
+    def __init__(self, app: Any):
+        self.app = app
+
+    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
+        if scope["type"] != "http" or not scope.get("path", "").rstrip("/").endswith(MCP_PATH):
+            await self.app(scope, receive, send)
+            return
+
+        async def framed_send(message):
+            if message["type"] == "http.response.start":
+                message = dict(message)
+                message["headers"] = [
+                    (key, value) for key, value in message.get("headers", [])
+                    if key.lower() != b"content-length"
+                ]
+            await send(message)
+
+        await self.app(scope, receive, framed_send)
+
+
 def generate_token() -> str:
     """A token with enough entropy to sit in a public URL."""
     return secrets.token_urlsafe(32)
@@ -323,6 +353,7 @@ def build_oauth_app(
             yield
 
     app = Starlette(routes=routes, lifespan=lifespan)
+    app.add_middleware(MCPResponseFramingMiddleware)
     app.state.oauth_provider = provider
     return app
 
@@ -434,7 +465,7 @@ def build_app(
     mcp_server.settings.transport_security = security
     mcp_server.settings.streamable_http_path = MCP_PATH
 
-    return TokenAuthMiddleware(mcp_server.streamable_http_app(), token)
+    return MCPResponseFramingMiddleware(TokenAuthMiddleware(mcp_server.streamable_http_app(), token))
 
 
 def describe_endpoints(host: str, port: int, token: Optional[str]) -> str:

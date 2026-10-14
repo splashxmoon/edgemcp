@@ -169,7 +169,7 @@ breaks quietly, because the old address just stops answering.
 `scripts/serve_forever.py` is the supervised version that avoids both:
 
 ```bash
-python scripts/serve_forever.py --hostname mcp-tunnel.example.com
+python scripts/serve_forever.py --hostname mcp.edgedefenseai.com --tunnel edgedefense-mcp --oauth
 ```
 
 It starts the tunnel **once** and leaves it alone. Every five minutes it fetches
@@ -190,6 +190,43 @@ A few deliberate choices:
 
 Without `--hostname` it falls back to a quick tunnel and prints a warning: the
 address is then only stable for as long as that tunnel process lives.
+
+#### Permanent endpoint on edgedefenseai.com
+
+The connector URL is **https://mcp.edgedefenseai.com/mcp** when the named
+Cloudflare tunnel and OAuth server are running. A Git push alone does not
+start either process or configure DNS.
+
+1. Create or reuse the Cloudflare tunnel `edgedefense-mcp`. Configure its
+   published hostname as `mcp.edgedefenseai.com`, with service
+   `http://127.0.0.1:8765`. Route that hostname to the tunnel in Cloudflare DNS;
+   inspect any existing record before replacing it. Keep credentials outside
+   this repository in your local `.cloudflared` directory.
+2. On the machine whose network you want to inspect, install both packages:
+   `python -m pip install -e ./core-engine -e ./mcp-server`.
+3. Start the supervisor from this checkout:
+
+   ```powershell
+   python scripts/serve_forever.py --hostname mcp.edgedefenseai.com --tunnel edgedefense-mcp --oauth --check-every 0
+   ```
+
+   `--tunnel` is the actual tunnel name or UUID; `--hostname` is its public
+   DNS name. Existing Cloudflare ingress configuration must use the same local
+   port as the supervisor. This command uses existing tunnel credentials; it
+   does not create a tunnel or change DNS. No inbound router ports are needed.
+4. Paste `https://mcp.edgedefenseai.com/mcp` into the connector, leave OAuth
+   client fields empty, and sign in. Set `EDGEDEFENSE_PASSPHRASE` before starting
+   to choose a passphrase, or read the generated value locally from the
+   gitignored `.edgedefense-passphrase` file. Never commit or share that file.
+5. Verify `/healthz` returns HTTP 200, metadata at
+   `/.well-known/oauth-authorization-server` advertises this hostname, and an
+   authenticated MCP client can list tools. Health alone does not verify MCP.
+
+Keep the supervisor running on an always-on home machine. For startup after
+Windows login, use Task Scheduler with this checkout as the working directory.
+`--check-every 0` disables automatic Git updates; restart after updating the
+checkout. Server restarts revoke OAuth sessions, so sign in again using the
+same connector URL.
 
 #### Getting a public URL
 

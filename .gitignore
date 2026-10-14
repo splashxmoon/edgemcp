@@ -30,3 +30,8 @@ htmlcov/
 edgedefense.sqlite3
 .edgedefense-token
 .cloudflared-tunnel.log
+
+.edgedefense-passphrase
+.edgedefense-public-url
+.edgedefense-server.log
+.supervisor-custom.log*

@@ -17,12 +17,54 @@ import pytest
 
 from edgedefense_mcp.cli import build_parser, resolve_token
 from edgedefense_mcp.http_app import (
+    MCPResponseFramingMiddleware,
     TokenAuthMiddleware,
     generate_token,
     is_loopback,
 )
 
 TOKEN = "s3cret-token-value"
+
+
+@pytest.mark.parametrize("status", [200, 401])
+def test_mcp_response_has_valid_chunk_framing(status):
+    """The wire body must agree with proxies that require chunked MCP responses."""
+    import h11
+
+    body = b'{"result":"test"}'
+    messages = []
+
+    async def app(scope, receive, send):
+        await send({"type": "http.response.start", "status": status,
+                    "headers": [(b"content-length", str(len(body)).encode()),
+                                (b"www-authenticate", b"Bearer")]})
+        await send({"type": "http.response.body", "body": body})
+
+    async def exercise():
+        async def send(message):
+            messages.append(message)
+        async def receive():
+            return {"type": "http.request", "body": b""}
+        await MCPResponseFramingMiddleware(app)(
+            {"type": "http", "path": "/mcp"}, receive, send)
+
+    run(exercise())
+    server, client = h11.Connection(h11.SERVER), h11.Connection(h11.CLIENT)
+    server.receive_data(client.send(h11.Request(method="GET", target="/mcp", headers=[("host", "test")])))
+    server.receive_data(client.send(h11.EndOfMessage()))
+    server.next_event()
+    server.next_event()
+    start = messages[0]
+    wire = server.send(h11.Response(status_code=start["status"], headers=start["headers"]))
+    assert b"transfer-encoding: chunked" in wire.lower()
+    wire += server.send(h11.Data(data=messages[1]["body"]))
+    wire += server.send(h11.EndOfMessage())
+    client.receive_data(wire)
+    response = client.next_event()
+    assert response.status_code == status
+    assert (b"www-authenticate", b"Bearer") in response.headers
+    assert client.next_event().data == body
+    assert isinstance(client.next_event(), h11.EndOfMessage)
 
 
 class StubApp:
